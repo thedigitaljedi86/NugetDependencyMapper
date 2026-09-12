@@ -6,6 +6,10 @@ Et .NET CLI-værktøj, der giver overblik over NuGet-afhængigheder i en solutio
 dotnet nuget-map ./MySolution.sln --restore --open
 ```
 
+![Dependency map i NuGet Map](docs/images/dependency-map.png)
+
+Skærmbilledet viser rapporten kørt på illustrative demo-data (`--demo`); dine egne pakkenavne, versioner og projekter vises i stedet.
+
 ## Prøv det fra kildekoden
 
 Bygning kræver .NET SDK 10.0.100 eller nyere 10.0 SDK. Det pakkede værktøj bruger .NET 10 runtime. Repositoryets `global.json` vælger en installeret 10.0 SDK.
