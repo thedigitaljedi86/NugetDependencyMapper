@@ -2,6 +2,8 @@
 
 Et .NET CLI-værktøj, der giver overblik over NuGet-afhængigheder i en solution, et projekt eller en mappe. Rapporten er én interaktiv HTML-fil, der kan åbnes direkte i browseren og deles uden server, CDN eller internetforbindelse.
 
+Rapporten bruger Open Sans, indlejret direkte i HTML-filen. Fonten og dens SIL Open Font License følger med værktøjet; browseren behøver ikke hente fonts fra nettet. Fontens kilde og licens findes i [Report/Fonts](src/NugetDependencyMapper/Report/Fonts/README.md).
+
 ```bash
 dotnet nuget-map ./MySolution.sln --restore --open
 ```

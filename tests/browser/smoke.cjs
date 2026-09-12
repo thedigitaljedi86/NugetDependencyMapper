@@ -23,8 +23,9 @@ assert((await page.locator('#inspector').innerText()).includes('Version drift de
 assert(await page.locator('.chain').count()>0,'dependency chains');
 assert(await page.locator('#inspector [data-project]').count()===5,'reverse usage');
 assert((await page.locator('.license-details').innerText()).includes('MIT'),'license expression in package inspector');
-assert(await page.locator('.page-footer a').getAttribute('href')==='https://itperformance.dk','footer link');
+assert(await page.locator('.page-footer a', {hasText:'IT Performance'}).getAttribute('href')==='https://itperformance.dk','footer link');
 assert((await page.locator('.page-footer').innerText()).includes('Powered by IT Performance'),'footer credit');
+assert(await page.locator('.page-footer a', {hasText:'Font Awesome'}).getAttribute('href')==='https://fontawesome.com','icon attribution link');
 await page.locator('[data-view="inventory"]').click();
 await page.locator('#license-filter').selectOption('unknown');
 assert(await page.locator('#package-table tr').count()===1,'unknown license filter');

@@ -10,8 +10,19 @@ public static class HtmlReport
     public static string Render(DependencyReport report)
     {
         // System.Text.Json's default encoder escapes HTML characters, including script terminators.
-        return Resource("index.html").Replace("/*__STYLE__*/", Resource("style.css"))
+        var style = Resource("style.css")
+            .Replace("/*__FONT_DATA__*/", FontData())
+            .Replace("/*__FONT_LICENSE__*/", $"/*\n{Resource("Fonts.OpenSans.OFL.txt")}\n*/");
+        return Resource("index.html").Replace("/*__STYLE__*/", style)
             .Replace("/*__APP__*/", Resource("app.js")).Replace("/*__DATA__*/", Json(report));
+    }
+    private static string FontData()
+    {
+        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("NugetDependencyMapper.Report.Fonts.OpenSans.ttf")
+            ?? throw new InvalidOperationException("Missing embedded Open Sans font.");
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return Convert.ToBase64String(buffer.ToArray());
     }
     private static string Resource(string name)
     {
