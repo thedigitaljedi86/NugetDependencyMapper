@@ -1,0 +1,7 @@
+**/bin/
+**/obj/
+artifacts/
+.tools/
+nuget-map.html
+nuget-map.json
+**/node_modules/
