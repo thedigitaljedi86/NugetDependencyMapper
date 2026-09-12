@@ -18,6 +18,8 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Report/*" />
+    <EmbeddedResource Include="Report/Fonts/*" />
+    <None Include="Report/Fonts/OpenSans.OFL.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 </Project>
