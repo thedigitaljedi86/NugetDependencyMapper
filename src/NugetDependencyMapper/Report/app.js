@@ -27,6 +27,28 @@
   const initialZoom = {width:800,height:600};
   let graphBounds = {...initialZoom};
 
+  const THEME_KEY = 'nugetmap-theme';
+  const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+  const isDarkMode = () => document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : systemDark.matches;
+  function paintThemeToggle() {
+    const dark = isDarkMode();
+    $('theme-toggle').setAttribute('aria-pressed', String(dark));
+    $('theme-toggle').querySelector('use').setAttribute('href', dark ? '#i-sun' : '#i-moon');
+    $('theme-toggle').title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  }
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === 'light' || saved === 'dark') document.documentElement.dataset.theme = saved;
+  } catch {}
+  systemDark.addEventListener('change', () => { if (!document.documentElement.dataset.theme) paintThemeToggle(); });
+  onClick('theme-toggle', () => {
+    const next = isDarkMode() ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem(THEME_KEY, next); } catch {}
+    paintThemeToggle();
+  });
+  paintThemeToggle();
+
   $('report-name').textContent = data.name;
   document.title = `${data.name} · NuGet Map`;
   $('generated').textContent = `Generated ${new Date(data.generatedAt).toLocaleString([], {dateStyle:'medium',timeStyle:'short'})}`;
@@ -118,7 +140,7 @@
     const height=Math.max(350,maxRows*87+85), width=(Math.max(0,...columns.keys())+1)*245+50;
     graphBounds={width,height};
     for(const [level,keys] of columns) {
-      const heading=svg('text',{x:30+level*245,y:30,fill:'#a2abb9','font-size':8,'letter-spacing':1.5});
+      const heading=svg('text',{x:30+level*245,y:30,class:'graph-level-label','font-size':8,'letter-spacing':1.5});
       heading.textContent=level===0?'PROJECT':level===1?'DIRECT / PROJECT REFERENCES':`DEPENDENCY LEVEL ${level}`;
       viewport.append(heading);
       keys.forEach((key,i)=>positions.set(key,{x:25+level*245,y:65+i*87+(maxRows-keys.length)*87/2}));
@@ -138,12 +160,13 @@
       const chosen=isProject?!state.package:selectedKeys.has(key);
       const group=svg('g',{class:`graph-node ${chosen?'selected':''}`,transform:`translate(${pos.x},${pos.y})`,tabindex:0,role:'button','aria-label':`${name}${use?' '+use.version:''}${drifted?', multiple versions across workspace':''}`});
       const title=svg('title');title.textContent=`${name}${use?' · '+use.version:''}${use&&!use.resolved?' (declared, not resolved)':''}${use?' · License: '+licenseLabel(use.license??{kind:'unknown'}):''}`;group.append(title);
-      group.append(svg('rect',{width:205,height:58,rx:8,fill:isProject?'#f3f0f9':'#fff',stroke:drifted?'#e9cfaf':isProject||isRef?'#ddd5ed':'#dce8e2'}));
-      group.append(svg('rect',{x:0,y:15,width:3,height:28,rx:1.5,fill:drifted?'#dbaa70':isProject||isRef?'#a596c5':'#8ab8a7'}));
-      const nodeIcon=svg('use',{href:`#i-${isProject||isRef?'diagram-project':'box'}`,x:11,y:15,width:15,height:15,fill:isProject||isRef?'#9d8bbf':'#6caa93'});group.append(nodeIcon);
-      const text=svg('text',{x:33,y:24,fill:'#465268','font-size':10,'font-weight':600});text.textContent=name.length>25?name.slice(0,24)+'…':name;group.append(text);
-      const sub=svg('text',{x:33,y:42,fill:'#98a2b0','font-size':8});sub.textContent=isProject?'Selected project':isRef?'Referenced project':`${use.version}  ·  ${!use.resolved?'declared':use.direct?'direct':'transitive'}`;group.append(sub);
-      if(drifted){const dot=svg('circle',{cx:192,cy:12,r:3,fill:'#dba064'});group.append(dot);}
+      const kind=isProject||isRef?'ref':'package';
+      group.append(svg('rect',{width:205,height:58,rx:8,class:`node-bg node-bg-${kind}${isProject?' node-bg-project':''}${drifted?' node-bg-drift':''}`}));
+      group.append(svg('rect',{x:0,y:15,width:3,height:28,rx:1.5,class:`node-accent node-accent-${kind}${drifted?' node-accent-drift':''}`}));
+      const nodeIcon=svg('use',{href:`#i-${isProject||isRef?'diagram-project':'box'}`,x:11,y:15,width:15,height:15,class:`node-icon node-icon-${kind}`});group.append(nodeIcon);
+      const text=svg('text',{x:33,y:24,class:'node-text','font-size':10,'font-weight':600});text.textContent=name.length>25?name.slice(0,24)+'…':name;group.append(text);
+      const sub=svg('text',{x:33,y:42,class:'node-subtext','font-size':8});sub.textContent=isProject?'Selected project':isRef?'Referenced project':`${use.version}  ·  ${!use.resolved?'declared':use.direct?'direct':'transitive'}`;group.append(sub);
+      if(drifted){const dot=svg('circle',{cx:192,cy:12,r:3,class:'node-drift-dot'});group.append(dot);}
       const activate=()=>{if(isProject){state.package=null;render();}else if(use)selectPackage(use.id);else{const match=data.projects.find(pr=>pr.name===name);if(match)selectProject(match.id);}};
       group.addEventListener('click',()=>{if(!dragMoved)activate();});
       group.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();activate();}});
