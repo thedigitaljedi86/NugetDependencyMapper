@@ -61,6 +61,7 @@ På Windows bruges `.\.tools\dotnet-nuget-map.exe`. Tilføj `.tools` til `PATH`,
 - **Versionsforskelle:** Pakker med flere gendannede versioner markeres i grafen og samles i en tabel sorteret efter antal berørte projekter.
 - **Afhængighedskæder:** “Why is it here?” viser veje fra projektet gennem pakker og projektreferencer til den valgte pakke.
 - **Navigation:** Søgning, klikbare grafnoder, zoom, panorering, dybdevalg og framework/runtime-vælger. Grafnoder kan aktiveres med Enter eller mellemrum; `/` fokuserer søgefeltet.
+- **Lyst/mørkt tema:** Følger systemets præference som standard. Måne-/sol-ikonet i toppen skifter manuelt og huskes i browserens `localStorage` ved genbesøg af samme rapportfil.
 - **Eksport og CI:** Download JSON fra HTML-siden, eller skriv JSON fra CLI. Lad CI reagere på versionsforskelle og ufuldstændig analyse via exitkoder.
 - **Licenser:** Se udgiverens deklarerede licens pr. gendannet pakkeversion i oversigten og pakkedetaljerne. Filtrér efter licensudtryk, licensfil, ældre licenslink, ukendte oplysninger eller krav om licensaccept. Søgefeltet i pakkeoversigten kan også finde licensudtryk som `MIT`.
 - **Analysebemærkninger:** Manglende eller forældet restore, ugyldige filer og NuGet-diagnostik vises i rapporten og terminalen.
