@@ -8,7 +8,7 @@ dotnet nuget-map ./MySolution.sln --restore --open
 
 ## Prøv det fra kildekoden
 
-Bygning kræver .NET SDK 8.0.400 eller nyere 8.0 SDK. Det pakkede værktøj bruger .NET 8 runtime. Repositoryets `global.json` vælger en installeret 8.0 SDK.
+Bygning kræver .NET SDK 10.0.100 eller nyere 10.0 SDK. Det pakkede værktøj bruger .NET 10 runtime. Repositoryets `global.json` vælger en installeret 10.0 SDK.
 
 ```bash
 # Lav en interaktiv demo med tydeligt mærkede, syntetiske data
