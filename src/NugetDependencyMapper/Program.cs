@@ -12,7 +12,6 @@ public static class Program
             var options = Options.Parse(args);
             if (options.Help) { Console.WriteLine(Options.HelpText); return 0; }
             if (options.Version) { Console.WriteLine("nuget-map 0.1.0"); return 0; }
-            RetroConsole.Banner();
             var output = Path.GetFullPath(options.Output);
             var json = options.Json is null ? null : Path.GetFullPath(options.Json);
             ValidateOutput(output, ".html");
@@ -21,6 +20,13 @@ public static class Program
             if (options.Name is null && Console.IsInputRedirected)
                 throw new ArgumentException("Specify --name <report name> when running without an interactive terminal.");
             var reportName = options.Name ?? ReadReportName(Console.In, Console.Out);
+            RetroConsole.Begin("NuGet Dependency Mapper Setup");
+            RetroConsole.Welcome("Welcome to Setup.",
+                $"This prepares a NuGet dependency report named \"{reportName}\".",
+                string.Empty,
+                options.Restore ? "  - Restoring NuGet packages" : "  - Reading existing restore data",
+                "  - Mapping projects and packages",
+                "  - Writing the HTML report");
             if (options.Restore && !options.Demo)
             {
                 var projects = Discovery.Find(options.Input);
@@ -30,12 +36,22 @@ public static class Program
                 foreach (var input in inputs)
                 {
                     index++;
-                    RetroConsole.Step(input, index, inputs.Count);
-                    var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(input)! };
+                    RetroConsole.Progress(input, index, inputs.Count);
+                    var start = new ProcessStartInfo("dotnet")
+                    {
+                        UseShellExecute = false,
+                        WorkingDirectory = Path.GetDirectoryName(input)!,
+                        RedirectStandardOutput = RetroConsole.Enabled,
+                        RedirectStandardError = RetroConsole.Enabled,
+                    };
                     start.ArgumentList.Add("restore");
                     start.ArgumentList.Add(input);
                     using var process = Process.Start(start) ?? throw new InvalidOperationException("Unable to start dotnet restore.");
+                    var drain = RetroConsole.Enabled
+                        ? Task.WhenAll(process.StandardOutput.ReadToEndAsync(), process.StandardError.ReadToEndAsync())
+                        : Task.CompletedTask;
                     await process.WaitForExitAsync();
+                    await drain;
                     if (process.ExitCode != 0)
                     {
                         if (!options.ContinueOnRestoreError) throw new InvalidOperationException($"dotnet restore failed with exit code {process.ExitCode}. No report was generated.");
@@ -55,6 +71,7 @@ public static class Program
                 await File.WriteAllTextAsync(json, HtmlReport.Json(report), new UTF8Encoding(false));
             }
             var drift = report.Packages.Count(p => p.HasVersionDrift);
+            await RetroConsole.Finish(success: true, "Setup completed successfully.", "Report saved to:", $"  {output}");
             Console.WriteLine($"Mapped {report.Projects.Count} projects and {report.Packages.Count} packages. {drift} packages have version drift.");
             foreach (var diagnostic in report.Diagnostics) Console.Error.WriteLine($"[{diagnostic.Code}] {diagnostic.Project}: {diagnostic.Message}");
             Console.WriteLine($"Report: {output}");
@@ -63,14 +80,13 @@ public static class Program
                 try { Process.Start(new ProcessStartInfo(new Uri(output).AbsoluteUri) { UseShellExecute = true }); }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { Console.Error.WriteLine($"Could not open browser: {ex.Message}"); }
             }
-            RetroConsole.Success(output);
             if (options.FailOnIncomplete && (report.Diagnostics.Count > 0 || report.Projects.Any(p => !p.Resolved))) return 3;
             return options.FailOnDrift && drift > 0 ? 2 : 0;
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or InvalidOperationException or System.Xml.XmlException or System.Text.Json.JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or KeyNotFoundException)
         {
+            await RetroConsole.Finish(success: false, "Setup did not complete.", ex.Message);
             Console.Error.WriteLine($"nuget-map: {ex.Message}");
-            RetroConsole.Failure(ex.Message);
             return 1;
         }
     }
