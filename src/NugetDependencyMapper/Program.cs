@@ -12,6 +12,7 @@ public static class Program
             var options = Options.Parse(args);
             if (options.Help) { Console.WriteLine(Options.HelpText); return 0; }
             if (options.Version) { Console.WriteLine("nuget-map 0.1.0"); return 0; }
+            RetroConsole.Banner();
             var output = Path.GetFullPath(options.Output);
             var json = options.Json is null ? null : Path.GetFullPath(options.Json);
             ValidateOutput(output, ".html");
@@ -25,9 +26,11 @@ public static class Program
                 var projects = Discovery.Find(options.Input);
                 var inputs = Directory.Exists(options.Input) ? projects : [Path.GetFullPath(options.Input)];
                 var failed = new List<string>();
+                var index = 0;
                 foreach (var input in inputs)
                 {
-                    Console.WriteLine($"Restoring {input}...");
+                    index++;
+                    RetroConsole.Step(input, index, inputs.Count);
                     var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(input)! };
                     start.ArgumentList.Add("restore");
                     start.ArgumentList.Add(input);
@@ -60,12 +63,14 @@ public static class Program
                 try { Process.Start(new ProcessStartInfo(new Uri(output).AbsoluteUri) { UseShellExecute = true }); }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { Console.Error.WriteLine($"Could not open browser: {ex.Message}"); }
             }
+            RetroConsole.Success(output);
             if (options.FailOnIncomplete && (report.Diagnostics.Count > 0 || report.Projects.Any(p => !p.Resolved))) return 3;
             return options.FailOnDrift && drift > 0 ? 2 : 0;
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or InvalidOperationException or System.Xml.XmlException or System.Text.Json.JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or KeyNotFoundException)
         {
             Console.Error.WriteLine($"nuget-map: {ex.Message}");
+            RetroConsole.Failure(ex.Message);
             return 1;
         }
     }
