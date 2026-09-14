@@ -100,7 +100,7 @@ dotnet nuget-map --help
 
 HTML/JSON bliver stadig skrevet ved kode `2` og `3`. Kode `3` har prioritet over `2`. `--fail-on-incomplete` er konservativ: også NuGet-advarsler og en muligvis forældet restore udløser den. Eksisterende rapportfiler på de valgte outputstier overskrives.
 
-I en interaktiv terminal vises et diskret retro-installationslook: en grå velkomstboks ved start, en segmenteret fremgangslinje for hvert projekt under `--restore`, og til sidst en grå boks med et grønt ✓ ved succes eller et rødt ☹ ved fejl. Det er ren pynt oven i de sædvanlige linjer (`Mapped …`, `Report: …`, fejlbeskeder) og slås automatisk fra, når output omdirigeres (fx i CI/scripts) eller `NO_COLOR` er sat.
+I en interaktiv terminal skifter værktøjet midlertidigt til en fuldskærms "Setup Wizard" i klassisk Windows XP-installations-stil: en blå skærm med titellinje, velkomsttekst, en segmenteret fremgangslinje pr. projekt under `--restore`, og til sidst "Setup completed successfully."/"Setup did not complete." Bundlinjen viser altid "Powered by IT Performance". Skærmen lukkes automatisk igen (kort pause ved slutresultatet), hvorefter terminalen vender tilbage til normal visning med de sædvanlige linjer (`Mapped …`, `Report: …`, fejlbeskeder) i scrollback. Det er ren pynt og slås automatisk fra, når output omdirigeres (fx i CI/scripts) eller `NO_COLOR` er sat — så scripts og logs er upåvirkede.
 
 ## Datagrundlag og afgrænsninger
 
