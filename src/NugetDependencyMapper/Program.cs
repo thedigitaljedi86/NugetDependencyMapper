@@ -24,6 +24,7 @@ public static class Program
             {
                 var projects = Discovery.Find(options.Input);
                 var inputs = Directory.Exists(options.Input) ? projects : [Path.GetFullPath(options.Input)];
+                var failed = new List<string>();
                 foreach (var input in inputs)
                 {
                     Console.WriteLine($"Restoring {input}...");
@@ -32,8 +33,14 @@ public static class Program
                     start.ArgumentList.Add(input);
                     using var process = Process.Start(start) ?? throw new InvalidOperationException("Unable to start dotnet restore.");
                     await process.WaitForExitAsync();
-                    if (process.ExitCode != 0) throw new InvalidOperationException($"dotnet restore failed with exit code {process.ExitCode}. No report was generated.");
+                    if (process.ExitCode != 0)
+                    {
+                        if (!options.ContinueOnRestoreError) throw new InvalidOperationException($"dotnet restore failed with exit code {process.ExitCode}. No report was generated.");
+                        Console.Error.WriteLine($"nuget-map: dotnet restore failed with exit code {process.ExitCode} for {input}. Continuing with the remaining projects.");
+                        failed.Add(input);
+                    }
                 }
+                if (failed.Count > 0) Console.Error.WriteLine($"nuget-map: {failed.Count} of {inputs.Count} project(s) failed to restore; their report data may be missing or stale.");
             }
             var report = options.Demo ? Demo.Create() : Analyzer.Analyze(options.Input, options.AssetsRoot);
             report.Name = reportName;
@@ -93,6 +100,7 @@ public sealed class Options
     public string? Json { get; set; }
     public string? AssetsRoot { get; set; }
     public bool Restore { get; set; }
+    public bool ContinueOnRestoreError { get; set; }
     public bool Open { get; set; }
     public bool Demo { get; set; }
     public bool FailOnDrift { get; set; }
@@ -119,6 +127,7 @@ public sealed class Options
                 case "--json": result.Json = Value(); break;
                 case "--assets-root": result.AssetsRoot = Value(); break;
                 case "--restore": result.Restore = true; break;
+                case "--continue-on-restore-error": result.ContinueOnRestoreError = true; break;
                 case "--open": result.Open = true; break;
                 case "--demo": result.Demo = true; break;
                 case "--fail-on-drift": result.FailOnDrift = true; break;
@@ -141,6 +150,7 @@ public sealed class Options
         --name <report name>      Report title; prompted for in interactive terminals
         --json <file.json>        Also export the graph as JSON
         --restore                Run dotnet restore before analysis
+        --continue-on-restore-error  Keep restoring remaining projects after a failure
         --assets-root <folder>   Find custom project.assets.json paths by project identity
         --open                   Open the report in your default browser
         --fail-on-drift           Exit 2 when resolved package versions differ

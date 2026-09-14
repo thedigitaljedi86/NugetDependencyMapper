@@ -82,13 +82,14 @@ dotnet nuget-map ./Product.sln             # Solution-medlemmer og projektrefere
 dotnet nuget-map ./Product.slnx            # XML solution-format
 dotnet nuget-map ./src/Api/Api.csproj       # Ét projekt og dets projektreferencer
 dotnet nuget-map ./src --restore           # Gendan før analysen
+dotnet nuget-map ./src --restore --continue-on-restore-error  # Fortsæt selvom et projekt fejler
 dotnet nuget-map . -o artifacts/map.html --json artifacts/map.json
 dotnet nuget-map . --assets-root ./artifacts/obj
 dotnet nuget-map . --fail-on-drift --fail-on-incomplete
 dotnet nuget-map --help
 ```
 
-`--restore` kører `dotnet restore` og bruger projektets normale NuGet-konfiguration. Private feeds skal være konfigureret i miljøet på forhånd. En mislykket restore stopper kørslen, så der ikke fremstilles en ny rapport med gamle data. Uden `--restore` foretager analysatoren hverken netværkskald eller MSBuild-evaluering.
+`--restore` kører `dotnet restore` og bruger projektets normale NuGet-konfiguration. Private feeds skal være konfigureret i miljøet på forhånd. En mislykket restore stopper kørslen som standard, så der ikke fremstilles en ny rapport med gamle data. Tilføj `--continue-on-restore-error`, hvis rapporten i stedet skal dække så mange projekter som muligt: en fejlet restore springes over, og analysen fortsætter med de øvrige projekter, mens det fejlede projekt vises med sine sædvanlige mangeldiagnostikker (fx `DECLARED_ONLY`) i rapporten. Uden `--restore` foretager analysatoren hverken netværkskald eller MSBuild-evaluering.
 
 | Exitkode | Betydning |
 | --- | --- |
@@ -113,7 +114,7 @@ Markeringerne gengiver pakkens metadata; de afgør ikke, om en bestemt anvendels
 
 En scanning af eksempelvis `/repos` finder projekter rekursivt i undermapperne og samler dem i **én rapport**, også når de tilhører forskellige solutions. Mappescanningen læser projektfilerne direkte og begrænser sig ikke til solution-medlemskab. Projekter med samme navn er adskilte via deres relative sti. Pakker samles på tværs af hele scanningen, så versionsforskelle mellem ellers uafhængige repositories også markeres.
 
-Med `--restore` køres restore sekventielt fra hvert projekts egen mappe, så dets `global.json` og normale projektkonfiguration bliver brugt. Store scanninger kan derfor tage tid; en restore-fejl stopper kørslen. Uden flaget bruges eksisterende restore-data, og manglende data markeres som hidtil. Rapportens filstørrelse vokser med antallet af projekter og targets; den aktuelle version viser højst 120 grafnoder ad gangen, men alle pakker er med i oversigten og JSON-eksporten. Der er ikke automatisk opdeling i én rapport pr. repository. Angiv et enkelt repository eller en solution, hvis sammenligningen skal afgrænses.
+Med `--restore` køres restore sekventielt fra hvert projekts egen mappe, så dets `global.json` og normale projektkonfiguration bliver brugt. Store scanninger kan derfor tage tid; en restore-fejl stopper kørslen, medmindre `--continue-on-restore-error` er angivet, så et enkelt fejlende repository ikke blokerer resten af en stor scanning. Uden `--restore` bruges eksisterende restore-data, og manglende data markeres som hidtil. Rapportens filstørrelse vokser med antallet af projekter og targets; den aktuelle version viser højst 120 grafnoder ad gangen, men alle pakker er med i oversigten og JSON-eksporten. Der er ikke automatisk opdeling i én rapport pr. repository. Angiv et enkelt repository eller en solution, hvis sammenligningen skal afgrænses.
 
 ### Afhængighedsgraf
 
