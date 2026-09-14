@@ -89,7 +89,7 @@ dotnet nuget-map . --fail-on-drift --fail-on-incomplete
 dotnet nuget-map --help
 ```
 
-`--restore` kører `dotnet restore` og bruger projektets normale NuGet-konfiguration. Private feeds skal være konfigureret i miljøet på forhånd. En mislykket restore stopper kørslen som standard, så der ikke fremstilles en ny rapport med gamle data. Tilføj `--continue-on-restore-error`, hvis rapporten i stedet skal dække så mange projekter som muligt: en fejlet restore springes over, og analysen fortsætter med de øvrige projekter, mens det fejlede projekt vises med sine sædvanlige mangeldiagnostikker (fx `DECLARED_ONLY`) i rapporten. Uden `--restore` foretager analysatoren hverken netværkskald eller MSBuild-evaluering.
+`--restore` kører `dotnet restore` og bruger projektets normale NuGet-konfiguration. Private feeds skal være konfigureret i miljøet på forhånd. En mislykket restore stopper kørslen som standard, så der ikke fremstilles en ny rapport med gamle data. Tilføj `--continue-on-restore-error`, hvis rapporten i stedet skal dække så mange projekter som muligt: en fejlet restore springes over, og analysen fortsætter med de øvrige projekter, mens det fejlede projekt vises med sine sædvanlige mangeldiagnostikker (fx `DECLARED_ONLY`, `MISSING_PROJECT`) i rapporten. Det gælder også en `<ProjectReference>` til et flyttet eller slettet projekt, hvor selve mappen ikke længere findes. Uden `--restore` foretager analysatoren hverken netværkskald eller MSBuild-evaluering.
 
 | Exitkode | Betydning |
 | --- | --- |
@@ -100,7 +100,7 @@ dotnet nuget-map --help
 
 HTML/JSON bliver stadig skrevet ved kode `2` og `3`. Kode `3` har prioritet over `2`. `--fail-on-incomplete` er konservativ: også NuGet-advarsler og en muligvis forældet restore udløser den. Eksisterende rapportfiler på de valgte outputstier overskrives.
 
-I en interaktiv terminal skifter værktøjet midlertidigt til en fuldskærms "Setup Wizard" i klassisk Windows XP-installations-stil: en blå skærm med titellinje, velkomsttekst, en segmenteret fremgangslinje pr. projekt under `--restore`, og til sidst "Setup completed successfully."/"Setup did not complete." Bundlinjen viser altid "Powered by IT Performance". Skærmen lukkes automatisk igen (kort pause ved slutresultatet), hvorefter terminalen vender tilbage til normal visning med de sædvanlige linjer (`Mapped …`, `Report: …`, fejlbeskeder) i scrollback. Det er ren pynt og slås automatisk fra, når output omdirigeres (fx i CI/scripts) eller `NO_COLOR` er sat — så scripts og logs er upåvirkede.
+I en interaktiv terminal skifter værktøjet midlertidigt til en fuldskærms "Setup Wizard" i klassisk Windows XP-installations-stil: en blå skærm med titellinje, velkomsttekst, en segmenteret fremgangslinje pr. projekt under `--restore`, og til sidst "Setup completed successfully."/"Setup did not complete." med detaljer. Bundlinjen viser altid "Powered by IT Performance". Skærmen bliver stående — også ved fejl — indtil der trykkes Enter; først da vender terminalen tilbage til normal visning med de sædvanlige linjer (`Mapped …`, `Report: …`, fejlbeskeder) i scrollback. Det er ren pynt og slås automatisk fra, når output eller input omdirigeres (fx i CI/scripts) eller `NO_COLOR` er sat — så scripts og logs er upåvirkede og venter aldrig på et tastetryk.
 
 ## Datagrundlag og afgrænsninger
 

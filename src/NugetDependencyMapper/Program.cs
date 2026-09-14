@@ -37,25 +37,37 @@ public static class Program
                 {
                     index++;
                     RetroConsole.Progress(input, index, inputs.Count);
-                    var start = new ProcessStartInfo("dotnet")
+                    int exitCode;
+                    string? startFailure = null;
+                    try
                     {
-                        UseShellExecute = false,
-                        WorkingDirectory = Path.GetDirectoryName(input)!,
-                        RedirectStandardOutput = RetroConsole.Enabled,
-                        RedirectStandardError = RetroConsole.Enabled,
-                    };
-                    start.ArgumentList.Add("restore");
-                    start.ArgumentList.Add(input);
-                    using var process = Process.Start(start) ?? throw new InvalidOperationException("Unable to start dotnet restore.");
-                    var drain = RetroConsole.Enabled
-                        ? Task.WhenAll(process.StandardOutput.ReadToEndAsync(), process.StandardError.ReadToEndAsync())
-                        : Task.CompletedTask;
-                    await process.WaitForExitAsync();
-                    await drain;
-                    if (process.ExitCode != 0)
+                        var start = new ProcessStartInfo("dotnet")
+                        {
+                            UseShellExecute = false,
+                            WorkingDirectory = Path.GetDirectoryName(input)!,
+                            RedirectStandardOutput = RetroConsole.Enabled,
+                            RedirectStandardError = RetroConsole.Enabled,
+                        };
+                        start.ArgumentList.Add("restore");
+                        start.ArgumentList.Add(input);
+                        using var process = Process.Start(start) ?? throw new InvalidOperationException("Unable to start dotnet restore.");
+                        var drain = RetroConsole.Enabled
+                            ? Task.WhenAll(process.StandardOutput.ReadToEndAsync(), process.StandardError.ReadToEndAsync())
+                            : Task.CompletedTask;
+                        await process.WaitForExitAsync();
+                        await drain;
+                        exitCode = process.ExitCode;
+                    }
+                    catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
                     {
-                        if (!options.ContinueOnRestoreError) throw new InvalidOperationException($"dotnet restore failed with exit code {process.ExitCode}. No report was generated.");
-                        Console.Error.WriteLine($"nuget-map: dotnet restore failed with exit code {process.ExitCode} for {input}. Continuing with the remaining projects.");
+                        exitCode = -1;
+                        startFailure = ex.Message;
+                    }
+                    if (exitCode != 0)
+                    {
+                        var reason = startFailure ?? $"exit code {exitCode}";
+                        if (!options.ContinueOnRestoreError) throw new InvalidOperationException($"dotnet restore failed for {input} ({reason}). No report was generated.");
+                        Console.Error.WriteLine($"nuget-map: dotnet restore failed for {input} ({reason}). Continuing with the remaining projects.");
                         failed.Add(input);
                     }
                 }
@@ -71,7 +83,7 @@ public static class Program
                 await File.WriteAllTextAsync(json, HtmlReport.Json(report), new UTF8Encoding(false));
             }
             var drift = report.Packages.Count(p => p.HasVersionDrift);
-            await RetroConsole.Finish(success: true, "Setup completed successfully.", "Report saved to:", $"  {output}");
+            RetroConsole.Finish(success: true, "Setup completed successfully.", "Report saved to:", $"  {output}");
             Console.WriteLine($"Mapped {report.Projects.Count} projects and {report.Packages.Count} packages. {drift} packages have version drift.");
             foreach (var diagnostic in report.Diagnostics) Console.Error.WriteLine($"[{diagnostic.Code}] {diagnostic.Project}: {diagnostic.Message}");
             Console.WriteLine($"Report: {output}");
@@ -85,7 +97,7 @@ public static class Program
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or InvalidOperationException or System.Xml.XmlException or System.Text.Json.JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or KeyNotFoundException)
         {
-            await RetroConsole.Finish(success: false, "Setup did not complete.", ex.Message);
+            RetroConsole.Finish(success: false, "Setup did not complete.", ex.Message);
             Console.Error.WriteLine($"nuget-map: {ex.Message}");
             return 1;
         }
