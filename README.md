@@ -100,6 +100,8 @@ dotnet nuget-map --help
 
 HTML/JSON bliver stadig skrevet ved kode `2` og `3`. Kode `3` har prioritet over `2`. `--fail-on-incomplete` er konservativ: også NuGet-advarsler og en muligvis forældet restore udløser den. Eksisterende rapportfiler på de valgte outputstier overskrives.
 
+I en interaktiv terminal vises et diskret retro-installationslook: en grå velkomstboks ved start, en segmenteret fremgangslinje for hvert projekt under `--restore`, og til sidst en grå boks med et grønt ✓ ved succes eller et rødt ☹ ved fejl. Det er ren pynt oven i de sædvanlige linjer (`Mapped …`, `Report: …`, fejlbeskeder) og slås automatisk fra, når output omdirigeres (fx i CI/scripts) eller `NO_COLOR` er sat.
+
 ## Datagrundlag og afgrænsninger
 
 ### Licensoplysninger
