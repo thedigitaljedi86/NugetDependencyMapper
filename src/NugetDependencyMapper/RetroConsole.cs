@@ -41,6 +41,7 @@ internal static class RetroConsole
             Console.Write(new string('─', _width));
             WriteFooter();
             _active = true;
+            Console.CancelKeyPress += RestoreTerminalOnCancel;
         }
         catch { _active = false; }
     }
@@ -79,23 +80,35 @@ internal static class RetroConsole
         catch { _active = false; }
     }
 
-    public static async Task Finish(bool success, string headline, params string[] detailLines)
+    public static void Finish(bool success, string headline, params string[] detailLines)
     {
         if (!_active) return;
         try
         {
             var content = new List<string> { headline, string.Empty };
             content.AddRange(detailLines);
+            content.Add(string.Empty);
+            content.Add("Press ENTER to exit.");
             DrawContent(content, success ? ConsoleColor.Green : ConsoleColor.Red);
-            await Task.Delay(1100);
+            if (!Console.IsInputRedirected)
+                while (Console.ReadKey(intercept: true).Key != ConsoleKey.Enter) { }
         }
         catch { /* purely decorative; never fail the run over a rendering hiccup */ }
         finally
         {
+            Console.CancelKeyPress -= RestoreTerminalOnCancel;
             try { Console.CursorVisible = true; } catch { /* best effort */ }
             try { Console.Out.Write(ExitAltScreen); } catch { /* best effort */ }
             _active = false;
         }
+    }
+
+    private static void RestoreTerminalOnCancel(object? sender, ConsoleCancelEventArgs e)
+    {
+        if (!_active) return;
+        _active = false;
+        try { Console.CursorVisible = true; } catch { /* best effort */ }
+        try { Console.Out.Write(ExitAltScreen); } catch { /* best effort */ }
     }
 
     private static void WriteFooter()
