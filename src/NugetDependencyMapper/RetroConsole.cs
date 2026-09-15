@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace NugetDependencyMapper;
 
 /// <summary>
@@ -63,22 +65,97 @@ internal static class RetroConsole
         if (!_active) { Console.WriteLine($"Restoring {projectPath}..."); return; }
         try
         {
-            const int barWidth = 40;
-            var filled = total <= 0 ? barWidth : Math.Clamp((int)Math.Round(barWidth * (double)current / total), 0, barWidth);
-            var bar = new string('█', filled) + new string('░', barWidth - filled);
-            var pct = total <= 0 ? 100 : Math.Clamp((int)Math.Round(100.0 * current / total), 0, 100);
             DrawContent(
             [
-                "Setup is restoring NuGet packages for your projects.",
+                "Restoring NuGet packages for your projects.",
                 "This might take a few minutes.",
                 string.Empty,
                 $"Restoring:  {Path.GetFileName(projectPath)}  ({current} of {total})",
                 string.Empty,
-                $"[{bar}] {pct,3}%",
+                $"[{Bar(current, total)}] {Percent(current, total),3}%",
             ]);
         }
         catch { _active = false; }
     }
+
+    public static void Scanning(string projectPath, int current, int total)
+    {
+        if (!_active) return;
+        try
+        {
+            DrawContent(
+            [
+                "Mapping projects and packages.",
+                "This might take a moment for large solutions.",
+                string.Empty,
+                $"Scanning:  {Path.GetFileName(projectPath)}  ({current} of {total})",
+                string.Empty,
+                $"[{Bar(current, total)}] {Percent(current, total),3}%",
+            ]);
+        }
+        catch { _active = false; }
+    }
+
+    /// <summary>
+    /// Reads the report name as its own screen inside the retro UI. Only called when input is
+    /// interactive, so a blocked read here always means a rendering failure, not missing input.
+    /// </summary>
+    public static string? PromptReportName()
+    {
+        if (!_active) return null;
+        try
+        {
+            DrawContent(
+            [
+                "Name this dependency report.",
+                "This title appears at the top of the generated HTML report.",
+                string.Empty,
+                "Report name:",
+            ]);
+            var row = HeaderRows + 4;
+            Console.SetCursorPosition(2, row);
+            Console.Write("> ");
+            Console.CursorVisible = true;
+            var name = new StringBuilder();
+            var maxLength = Math.Max(1, _width - 8);
+            while (true)
+            {
+                var key = Console.ReadKey(intercept: true);
+                if (key.Key == ConsoleKey.Enter)
+                {
+                    if (name.Length > 0) break;
+                    continue;
+                }
+                if (key.Key == ConsoleKey.Backspace)
+                {
+                    if (name.Length == 0) continue;
+                    name.Length--;
+                    Console.SetCursorPosition(4 + name.Length, row);
+                    Console.Write(' ');
+                    Console.SetCursorPosition(4 + name.Length, row);
+                    continue;
+                }
+                if (!char.IsControl(key.KeyChar) && name.Length < maxLength)
+                {
+                    name.Append(key.KeyChar);
+                    Console.Write(key.KeyChar);
+                }
+            }
+            Console.CursorVisible = false;
+            return name.ToString().Trim();
+        }
+        catch { _active = false; return null; }
+    }
+
+    private static string Bar(int current, int total)
+    {
+        const int barWidth = 40;
+        var filled = total <= 0 ? barWidth : Math.Clamp((int)Math.Round(barWidth * (double)current / total), 0, barWidth);
+        return new string('█', filled) + new string('░', barWidth - filled);
+    }
+
+    private static int Percent(int current, int total)
+        => total <= 0 ? 100 : Math.Clamp((int)Math.Round(100.0 * current / total), 0, 100);
 
     public static void Finish(bool success, string headline, params string[] detailLines)
     {

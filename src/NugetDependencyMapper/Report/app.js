@@ -27,6 +27,14 @@
   const initialZoom = {width:800,height:600};
   let graphBounds = {...initialZoom};
 
+  const NS_FILTER_KEY = 'nugetmap-ns-filter';
+  function loadExcludePrefixes() {
+    try { return (localStorage.getItem(NS_FILTER_KEY) ?? '').split(',').map(s=>s.trim()).filter(Boolean); }
+    catch { return []; }
+  }
+  state.excludePrefixes = loadExcludePrefixes();
+  const isExcluded = id => state.excludePrefixes.some(prefix => lower(id).startsWith(lower(prefix)));
+
   const THEME_KEY = 'nugetmap-theme';
   const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
   const isDarkMode = () => document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : systemDark.matches;
@@ -60,10 +68,16 @@
   $('drift-count').textContent = drift.length;
   $('drift-badge').textContent = drift.length;
   $('transitive-count').textContent = data.packages.filter(p=>p.usages.some(u=>u.resolved && !u.direct)).length;
+  const ERROR_CODES = new Set(['MISSING_PROJECT','INVALID_ASSETS','INVALID_PROJECT','RESTORE_FAILED']);
   if (data.diagnostics.length) {
+    const errors = data.diagnostics.filter(d=>ERROR_CODES.has(d.code));
     $('diagnostics-section').hidden = false;
-    $('diagnostics-title').textContent = `${data.diagnostics.length} analysis note${data.diagnostics.length===1?'':'s'} · Check coverage before planning an upgrade`;
-    $('diagnostics-list').innerHTML = data.diagnostics.map(d=>`<div class="diagnostic"><code>${esc(d.code)}</code>${esc(d.message)}<small>${esc(d.project)}</small></div>`).join('');
+    $('diagnostics-section').classList.toggle('has-errors', errors.length>0);
+    $('diagnostics-section').querySelector('details').open = errors.length>0;
+    $('diagnostics-title').textContent = errors.length
+      ? `${errors.length} error${errors.length===1?'':'s'} to fix · ${data.diagnostics.length} analysis note${data.diagnostics.length===1?'':'s'} total`
+      : `${data.diagnostics.length} analysis note${data.diagnostics.length===1?'':'s'} · Check coverage before planning an upgrade`;
+    $('diagnostics-list').innerHTML = data.diagnostics.map(d=>`<div class="diagnostic ${ERROR_CODES.has(d.code)?'diagnostic-error':''}"><code>${esc(d.code)}</code>${esc(d.message)}<small>${esc(d.project)}</small></div>`).join('');
   }
 
   function setView(view) {
@@ -99,7 +113,7 @@
   function renderExplorer() {
     const query=lower($('search').value);
     const isProject=state.explorer==='projects';
-    const items=(isProject?data.projects:data.packages).filter(p=>lower(isProject?`${p.name} ${p.id}`:p.id).includes(query));
+    const items=(isProject?data.projects:data.packages).filter(p=>lower(isProject?`${p.name} ${p.id}`:p.id).includes(query)).filter(p=>isProject||!isExcluded(p.id));
     $('explorer-count').textContent=items.length;
     $('explorer-list').innerHTML=items.length?items.map(p=>{
       const count=isProject?unique(p.targets.flatMap(t=>t.packages.map(u=>lower(u.id)))).length:unique(p.usages.map(u=>u.project)).length;
@@ -115,7 +129,69 @@
   }
   function render() { renderExplorer(); renderTargets(); renderGraph(); renderInspector(); }
 
+  function packageProjectRows(pkg) {
+    const byProject=new Map();
+    for(const u of pkg.usages) { if(!byProject.has(u.project))byProject.set(u.project,[]); byProject.get(u.project).push(u); }
+    return [...byProject.entries()].map(([id,uses])=>({
+      id, name: projectIndex.get(id)?.name ?? id,
+      versions: unique(uses.map(u=>u.key.slice(u.key.lastIndexOf('/')+1))),
+      direct: uses.some(u=>u.direct),
+    }));
+  }
+
   function renderGraph() {
+    const pkg=selectedPackage();
+    $('graph-filters').hidden=!!pkg;
+    $('export-package').hidden=!pkg;
+    if(pkg) renderPackageGraph(pkg); else renderProjectGraph();
+  }
+
+  function renderPackageGraph(pkg) {
+    const rows=packageProjectRows(pkg);
+    $('graph-title').textContent=pkg.id;
+    $('graph-subtitle').textContent=`${rows.length} project${rows.length===1?'':'s'} depend on this package`;
+    const viewport=$('viewport'); viewport.replaceChildren();
+    $('graph-empty').hidden=rows.length>0;
+    $('graph-empty').textContent='No projects use this package.';
+    if(!rows.length) { $('graph-status').textContent=''; graphBounds={...initialZoom}; requestAnimationFrame(fit); return; }
+    const maxRows=rows.length, height=Math.max(350,maxRows*87+85), width=2*245+50;
+    graphBounds={width,height};
+    const projectHeading=svg('text',{x:30,y:30,class:'graph-level-label','font-size':8,'letter-spacing':1.5});projectHeading.textContent='PROJECTS';viewport.append(projectHeading);
+    const packageHeading=svg('text',{x:30+245,y:30,class:'graph-level-label','font-size':8,'letter-spacing':1.5});packageHeading.textContent='PACKAGE';viewport.append(packageHeading);
+    const positions=new Map();
+    rows.forEach((row,i)=>positions.set(row.id,{x:25,y:65+i*87}));
+    const pkgPos={x:25+245,y:65+(maxRows-1)*87/2};
+    for(const row of rows) {
+      const a=positions.get(row.id),b=pkgPos, delta=Math.max(30,(b.x-a.x-205)/2);
+      viewport.append(svg('path',{d:`M${a.x+205},${a.y+29} C${a.x+205+delta},${a.y+29} ${b.x-delta},${b.y+29} ${b.x},${b.y+29}`,class:'graph-edge highlight','marker-end':'url(#arrow)'}));
+    }
+    for(const row of rows) {
+      const pos=positions.get(row.id);
+      const group=svg('g',{class:'graph-node',transform:`translate(${pos.x},${pos.y})`,tabindex:0,role:'button','aria-label':`${row.name} · ${row.versions.join(', ')}`});
+      const title=svg('title');title.textContent=`${row.name} · ${row.versions.join(', ')}`;group.append(title);
+      group.append(svg('rect',{width:205,height:58,rx:8,class:'node-bg node-bg-ref'}));
+      group.append(svg('rect',{x:0,y:15,width:3,height:28,rx:1.5,class:'node-accent node-accent-ref'}));
+      group.append(svg('use',{href:'#i-diagram-project',x:11,y:15,width:15,height:15,class:'node-icon node-icon-ref'}));
+      const text=svg('text',{x:33,y:24,class:'node-text','font-size':10,'font-weight':600});text.textContent=row.name.length>25?row.name.slice(0,24)+'…':row.name;group.append(text);
+      const sub=svg('text',{x:33,y:42,class:'node-subtext','font-size':8});sub.textContent=`${row.versions.join(', ')} · ${row.direct?'direct':'transitive'}`;group.append(sub);
+      const activate=()=>{if(!dragMoved) selectProject(row.id);};
+      group.addEventListener('click',activate);
+      group.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();activate();}});
+      viewport.append(group);
+    }
+    const pkgGroup=svg('g',{class:'graph-node selected',transform:`translate(${pkgPos.x},${pkgPos.y})`});
+    pkgGroup.append(svg('rect',{width:205,height:58,rx:8,class:`node-bg node-bg-package${pkg.hasVersionDrift?' node-bg-drift':''}`}));
+    pkgGroup.append(svg('rect',{x:0,y:15,width:3,height:28,rx:1.5,class:`node-accent node-accent-package${pkg.hasVersionDrift?' node-accent-drift':''}`}));
+    pkgGroup.append(svg('use',{href:'#i-box',x:11,y:15,width:15,height:15,class:'node-icon node-icon-package'}));
+    const pkgName=svg('text',{x:33,y:24,class:'node-text','font-size':10,'font-weight':600});pkgName.textContent=pkg.id.length>25?pkg.id.slice(0,24)+'…':pkg.id;pkgGroup.append(pkgName);
+    const pkgSub=svg('text',{x:33,y:42,class:'node-subtext','font-size':8});pkgSub.textContent=pkg.versions.length?pkg.versions.join(', '):'Unresolved';pkgGroup.append(pkgSub);
+    if(pkg.hasVersionDrift){const dot=svg('circle',{cx:192,cy:12,r:3,class:'node-drift-dot'});pkgGroup.append(dot);}
+    viewport.append(pkgGroup);
+    $('graph-status').textContent=`${rows.length} project${rows.length===1?'':'s'} depend on ${pkg.id}`;
+    requestAnimationFrame(fit);
+  }
+
+  function renderProjectGraph() {
     const p=project(), t=target();
     $('graph-title').textContent=p?.name??'No project selected';
     $('graph-subtitle').textContent=t?`${t.name} · ${t.packages.length} package${t.packages.length===1?'':'s'}`:'No dependency graph available';
@@ -123,12 +199,12 @@
     $('graph-empty').hidden=!!t?.packages.length;
     $('graph-empty').textContent=!p?.resolved?'Restore this project to reveal its dependency graph.':'No NuGet package dependencies in this target.';
     if(!t) { $('graph-status').textContent='No restore data'; return; }
-    const allKeys=new Set([...t.packages.map(u=>u.key),...Object.keys(t.projectLibraries)]);
+    const allKeys=new Set([...t.packages.filter(u=>!isExcluded(u.id)).map(u=>u.key),...Object.keys(t.projectLibraries)]);
     const levels=new Map([['@project',0]]), queue=[];
     for(const key of t.roots) if(allKeys.has(key)&&!levels.has(key)){levels.set(key,1);queue.push(key);}
     const outgoing=new Map();
     for(const e of t.edges) { if(!outgoing.has(e.from))outgoing.set(e.from,[]);outgoing.get(e.from).push(e.to); }
-    for(let i=0;i<queue.length;i++) for(const key of outgoing.get(queue[i])??[]) if(!levels.has(key)) { levels.set(key,levels.get(queue[i])+1);queue.push(key); }
+    for(let i=0;i<queue.length;i++) for(const key of outgoing.get(queue[i])??[]) if(allKeys.has(key)&&!levels.has(key)) { levels.set(key,levels.get(queue[i])+1);queue.push(key); }
     // Keep disconnected restored nodes inspectable without inventing dependency edges.
     for(const key of allKeys) if(!levels.has(key)) levels.set(key,2);
     let nodes=[...levels].filter(([,level])=>level<=state.depth);
@@ -219,7 +295,7 @@
     const isDrift=state.view==='drift',query=lower($('table-search').value),licenseFilter=$('license-filter').value;
     $('table-title').textContent=isDrift?'A shared package. Different versions.':'Every package, in one place.';
     $('table-description').textContent=isDrift?'Prioritize packages with the widest project impact. Different versions are a review signal, not proof of incompatibility. Counts cover all targets.':'Direct and transitive usage across the workspace. Select a package to inspect its projects and dependency chains.';
-    const packages=(isDrift?drift:data.packages).filter(p=>lower(p.id+' '+licenseEntries(p).map(l=>l.license.value??'').join(' ')).includes(query)).filter(p=>licenseFilter==='all'||licenseEntries(p).some(({license})=>licenseFilter==='acceptance'?license.requireAcceptance:license.kind===licenseFilter)).sort((a,b)=>unique(b.usages.map(u=>u.project)).length-unique(a.usages.map(u=>u.project)).length||a.id.localeCompare(b.id));
+    const packages=(isDrift?drift:data.packages).filter(p=>!isExcluded(p.id)).filter(p=>lower(p.id+' '+licenseEntries(p).map(l=>l.license.value??'').join(' ')).includes(query)).filter(p=>licenseFilter==='all'||licenseEntries(p).some(({license})=>licenseFilter==='acceptance'?license.requireAcceptance:license.kind===licenseFilter)).sort((a,b)=>unique(b.usages.map(u=>u.project)).length-unique(a.usages.map(u=>u.project)).length||a.id.localeCompare(b.id));
     $('table-empty').hidden=packages.length>0;
     $('table-empty').textContent=isDrift&&!drift.length?'No resolved version drift found. Check analysis notes for any missing restore data.':'No matching packages.';
     $('package-table').innerHTML=packages.map(p=>`<tr><td>${esc(p.id)}${p.hasVersionDrift?`<small>${icon('arrows-left-right')} Version drift</small>`:''}</td><td>${p.versions.map(v=>pill(v,p.hasVersionDrift?'warning':'good')).join('')||pill('Unresolved','warning')}${p.usages.some(u=>!u.resolved)?pill('Includes declarations','warning'):''}</td><td class="license-cell">${licenseBadges(p)}</td><td>${unique(p.usages.map(u=>u.project)).length}</td><td>${p.usages.some(u=>u.direct)?pill('Direct'):''}${p.usages.some(u=>u.resolved&&!u.direct)?pill('Transitive'):''}</td><td><button class="button" data-package="${esc(p.id)}">Inspect ${icon('arrow-up-right-from-square')}</button></td></tr>`).join('');
@@ -233,6 +309,27 @@
   $('depth').addEventListener('change',()=>{state.depth=Number($('depth').value);renderGraph();});
   onClick('reset',fit);onClick('zoom-in',()=>zoom(1.25));onClick('zoom-out',()=>zoom(.8));
   onClick('export',()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='nuget-map.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
+  const csvField=value=>{value=String(value??'');return /[",\r\n]/.test(value)?'"'+value.replace(/"/g,'""')+'"':value;};
+  onClick('export-package',()=>{
+    const pkg=selectedPackage();if(!pkg)return;
+    const rows=packageProjectRows(pkg);
+    const csv=['Project,Version'].concat(rows.map(r=>`${csvField(r.name)},${csvField(r.versions.join('; '))}`)).join('\r\n');
+    const url=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+    const a=document.createElement('a');a.href=url;a.download=`${pkg.id.replace(/[^a-z0-9.-]+/gi,'_')}-projects.csv`;a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  });
+  function applyNamespaceFilter() {
+    const raw=$('ns-filter').value;
+    state.excludePrefixes=raw.split(',').map(s=>s.trim()).filter(Boolean);
+    try { localStorage.setItem(NS_FILTER_KEY, raw); } catch {}
+    const hiddenCount=data.packages.filter(p=>isExcluded(p.id)).length;
+    $('ns-filter-count').textContent=hiddenCount?`${hiddenCount} hidden`:'';
+    render();
+    if(state.view!=='map') renderTable();
+  }
+  try { $('ns-filter').value=localStorage.getItem(NS_FILTER_KEY) ?? ''; } catch {}
+  $('ns-filter-count').textContent=(()=>{const n=data.packages.filter(p=>isExcluded(p.id)).length;return n?`${n} hidden`:'';})();
+  $('ns-filter').addEventListener('input', applyNamespaceFilter);
   document.addEventListener('keydown',e=>{if(e.key==='/'&&!e.ctrlKey&&!e.metaKey&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){e.preventDefault();(state.view==='map'?$('search'):$('table-search')).focus();}});
   setExplorer('projects');render();
 })();

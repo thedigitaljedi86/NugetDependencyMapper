@@ -57,18 +57,19 @@ På Windows bruges `.\.tools\dotnet-nuget-map.exe`. Tilføj `.tools` til `PATH`,
 ## Det kan rapporten
 
 - **Projekt → pakker:** Vælg et projekt og se direkte og transitive referencer pr. framework/runtime.
-- **Pakke → projekter:** Vælg en pakke og se hvilke projekter der bruger den, versioner, targets og deklarerede versionskrav.
+- **Pakke → projekter:** Vælg en pakke, og midtergrafen skifter til at vise alle projekter, der er afhængige af den, med version pr. projekt. Listen kan eksporteres til CSV (projektnavn og version).
+- **Namespace-filter:** Skjul pakker efter præfiks (fx `Microsoft`, `System`) i både grafen, pakkeoversigten og versionsforskelle. Filteret huskes i browserens `localStorage`.
 - **Versionsforskelle:** Pakker med flere gendannede versioner markeres i grafen og samles i en tabel sorteret efter antal berørte projekter.
 - **Afhængighedskæder:** “Why is it here?” viser veje fra projektet gennem pakker og projektreferencer til den valgte pakke.
 - **Navigation:** Søgning, klikbare grafnoder, zoom, panorering, dybdevalg og framework/runtime-vælger. Grafnoder kan aktiveres med Enter eller mellemrum; `/` fokuserer søgefeltet.
 - **Lyst/mørkt tema:** Følger systemets præference som standard. Måne-/sol-ikonet i toppen skifter manuelt og huskes i browserens `localStorage` ved genbesøg af samme rapportfil.
 - **Eksport og CI:** Download JSON fra HTML-siden, eller skriv JSON fra CLI. Lad CI reagere på versionsforskelle og ufuldstændig analyse via exitkoder.
 - **Licenser:** Se udgiverens deklarerede licens pr. gendannet pakkeversion i oversigten og pakkedetaljerne. Filtrér efter licensudtryk, licensfil, ældre licenslink, ukendte oplysninger eller krav om licensaccept. Søgefeltet i pakkeoversigten kan også finde licensudtryk som `MIT`.
-- **Analysebemærkninger:** Manglende eller forældet restore, ugyldige filer og NuGet-diagnostik vises i rapporten og terminalen.
+- **Analysebemærkninger:** Manglende eller forældet restore, ugyldige filer, mislykkede restores og NuGet-diagnostik vises i rapporten og terminalen. Fejl (fx en mislykket restore) folder analysebemærkningerne automatisk ud og markeres rødt, så de er synlige uden et ekstra klik.
 
 ## Kommandoer
 
-Ved interaktiv kørsel spørger værktøjet efter rapportens navn med `Report name:`. Navnet bruges som overskrift i HTML-rapporten, i browserfanen og i JSON-data. Tomme svar udløser spørgsmålet igen. Angiv `--name`, hvis navnet allerede er kendt, eller ved automatiseret kørsel uden terminal:
+Ved interaktiv kørsel spørger værktøjet efter rapportens navn direkte i fuldskærmsvisningen med `Report name:`. Navnet bruges som overskrift i HTML-rapporten, i browserfanen og i JSON-data. Tomme svar udløser spørgsmålet igen. Angiv `--name`, hvis navnet allerede er kendt, eller ved automatiseret kørsel uden terminal:
 
 ```bash
 dotnet nuget-map ./src --name "Platformens NuGet-afhængigheder" -o artifacts/map.html
@@ -100,7 +101,7 @@ dotnet nuget-map --help
 
 HTML/JSON bliver stadig skrevet ved kode `2` og `3`. Kode `3` har prioritet over `2`. `--fail-on-incomplete` er konservativ: også NuGet-advarsler og en muligvis forældet restore udløser den. Eksisterende rapportfiler på de valgte outputstier overskrives.
 
-I en interaktiv terminal skifter værktøjet midlertidigt til en fuldskærms "Setup Wizard" i klassisk Windows XP-installations-stil: en blå skærm med titellinje, velkomsttekst, en segmenteret fremgangslinje pr. projekt under `--restore`, og til sidst "Setup completed successfully."/"Setup did not complete." med detaljer. Bundlinjen viser altid "Powered by IT Performance". Skærmen bliver stående — også ved fejl — indtil der trykkes Enter; først da vender terminalen tilbage til normal visning med de sædvanlige linjer (`Mapped …`, `Report: …`, fejlbeskeder) i scrollback. Det er ren pynt og slås automatisk fra, når output eller input omdirigeres (fx i CI/scripts) eller `NO_COLOR` er sat — så scripts og logs er upåvirkede og venter aldrig på et tastetryk.
+I en interaktiv terminal skifter værktøjet midlertidigt til en fuldskærmsvisning i klassisk Windows XP-installations-stil: en blå skærm med titellinje, et skærmbillede hvor rapportens navn indtastes (medmindre `--name` er angivet), en "Scanning:"-fremgangslinje mens projekter og pakker analyseres, en tilsvarende fremgangslinje pr. projekt under `--restore`, og til sidst en statusskærm med detaljer. Bundlinjen viser altid "Powered by IT Performance". Skærmen bliver stående — også ved fejl — indtil der trykkes Enter; først da vender terminalen tilbage til normal visning med de sædvanlige linjer (`Mapped …`, `Report: …`, fejlbeskeder) i scrollback. Det er ren pynt og slås automatisk fra, når output eller input omdirigeres (fx i CI/scripts) eller `NO_COLOR` er sat — så scripts og logs er upåvirkede og venter aldrig på et tastetryk.
 
 ## Datagrundlag og afgrænsninger
 
