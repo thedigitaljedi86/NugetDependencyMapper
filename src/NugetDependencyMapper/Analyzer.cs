@@ -5,7 +5,7 @@ namespace NugetDependencyMapper;
 
 public static class Analyzer
 {
-    public static DependencyReport Analyze(string input, string? assetsRoot = null)
+    public static DependencyReport Analyze(string input, string? assetsRoot = null, Action<string, int, int>? onProgress = null)
     {
         var files = Discovery.Find(input);
         if (files.Count == 0) throw new InvalidOperationException("No .NET projects were found in the selected input.");
@@ -13,8 +13,10 @@ public static class Analyzer
         var report = new DependencyReport { Name = Directory.Exists(input) ? new DirectoryInfo(root).Name : Path.GetFileName(input) };
         var customAssets = IndexAssets(assetsRoot);
         var licenses = new LicenseReader();
+        var scanned = 0;
         foreach (var file in files)
         {
+            onProgress?.Invoke(file, ++scanned, files.Count);
             var project = new ProjectInfo { Id = Path.GetRelativePath(root, file).Replace('\\', '/'), Name = Path.GetFileNameWithoutExtension(file), Path = file };
             report.Projects.Add(project);
             if (!File.Exists(file))

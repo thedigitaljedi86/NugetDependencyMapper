@@ -19,19 +19,19 @@ public static class Program
             if (json == output) throw new ArgumentException("HTML and JSON output must have different paths.");
             if (options.Name is null && Console.IsInputRedirected)
                 throw new ArgumentException("Specify --name <report name> when running without an interactive terminal.");
-            var reportName = options.Name ?? ReadReportName(Console.In, Console.Out);
-            RetroConsole.Begin("NuGet Dependency Mapper Setup");
-            RetroConsole.Welcome("Welcome to Setup.",
-                $"This prepares a NuGet dependency report named \"{reportName}\".",
+            RetroConsole.Begin("NuGet Dependency Mapper");
+            var reportName = options.Name ?? RetroConsole.PromptReportName() ?? ReadReportName(Console.In, Console.Out);
+            RetroConsole.Welcome("Preparing your dependency report.",
+                $"Report name: \"{reportName}\"",
                 string.Empty,
                 options.Restore ? "  - Restoring NuGet packages" : "  - Reading existing restore data",
                 "  - Mapping projects and packages",
                 "  - Writing the HTML report");
+            var failed = new List<(string Input, string Reason)>();
             if (options.Restore && !options.Demo)
             {
                 var projects = Discovery.Find(options.Input);
                 var inputs = Directory.Exists(options.Input) ? projects : [Path.GetFullPath(options.Input)];
-                var failed = new List<string>();
                 var index = 0;
                 foreach (var input in inputs)
                 {
@@ -68,12 +68,20 @@ public static class Program
                         var reason = startFailure ?? $"exit code {exitCode}";
                         if (!options.ContinueOnRestoreError) throw new InvalidOperationException($"dotnet restore failed for {input} ({reason}). No report was generated.");
                         Console.Error.WriteLine($"nuget-map: dotnet restore failed for {input} ({reason}). Continuing with the remaining projects.");
-                        failed.Add(input);
+                        failed.Add((input, reason));
                     }
                 }
                 if (failed.Count > 0) Console.Error.WriteLine($"nuget-map: {failed.Count} of {inputs.Count} project(s) failed to restore; their report data may be missing or stale.");
             }
-            var report = options.Demo ? Demo.Create() : Analyzer.Analyze(options.Input, options.AssetsRoot);
+            var report = options.Demo ? Demo.Create() : Analyzer.Analyze(options.Input, options.AssetsRoot, (file, current, total) => RetroConsole.Scanning(file, current, total));
+            foreach (var (failedInput, reason) in failed)
+            {
+                var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                var project = report.Projects.FirstOrDefault(p => string.Equals(p.Path, failedInput, comparison));
+                report.Diagnostics.Add(new Diagnostic("RESTORE_FAILED",
+                    $"dotnet restore failed ({reason}). Package versions and dependency chains may be missing or stale until this is fixed and the report is regenerated.",
+                    project?.Id ?? Path.GetFileName(failedInput)));
+            }
             report.Name = reportName;
             Directory.CreateDirectory(Path.GetDirectoryName(output)!);
             await File.WriteAllTextAsync(output, HtmlReport.Render(report), new UTF8Encoding(false));
@@ -83,7 +91,7 @@ public static class Program
                 await File.WriteAllTextAsync(json, HtmlReport.Json(report), new UTF8Encoding(false));
             }
             var drift = report.Packages.Count(p => p.HasVersionDrift);
-            RetroConsole.Finish(success: true, "Setup completed successfully.", "Report saved to:", $"  {output}");
+            RetroConsole.Finish(success: true, "Report generated successfully.", "Report saved to:", $"  {output}");
             Console.WriteLine($"Mapped {report.Projects.Count} projects and {report.Packages.Count} packages. {drift} packages have version drift.");
             foreach (var diagnostic in report.Diagnostics) Console.Error.WriteLine($"[{diagnostic.Code}] {diagnostic.Project}: {diagnostic.Message}");
             Console.WriteLine($"Report: {output}");
@@ -97,7 +105,7 @@ public static class Program
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or InvalidOperationException or System.Xml.XmlException or System.Text.Json.JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or KeyNotFoundException)
         {
-            RetroConsole.Finish(success: false, "Setup did not complete.", ex.Message);
+            RetroConsole.Finish(success: false, "Report generation failed.", ex.Message);
             Console.Error.WriteLine($"nuget-map: {ex.Message}");
             return 1;
         }
