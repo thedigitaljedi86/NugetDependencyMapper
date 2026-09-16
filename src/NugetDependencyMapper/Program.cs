@@ -97,25 +97,49 @@ public static class Program
                 await File.WriteAllTextAsync(json, HtmlReport.Json(report), new UTF8Encoding(false));
             }
             var drift = report.Packages.Count(p => p.HasVersionDrift);
-            var errors = report.Diagnostics.Count(d => d.Severity == DiagnosticSeverity.Error);
-            RetroConsole.Finish(success: true, "Report generated successfully.", "Report saved to:", $"  {output}");
+            var errors = report.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+            RetroConsole.Finish(success: errors.Count == 0,
+                errors.Count == 0 ? "Report generated successfully." : $"Report generated with {Count(errors.Count)}.",
+                "Report saved to:", $"  {output}");
             Console.WriteLine($"Mapped {report.Projects.Count} projects and {report.Packages.Count} packages. {drift} packages have version drift.");
-            foreach (var diagnostic in report.Diagnostics)
-                Console.Error.WriteLine($"{(diagnostic.Severity == DiagnosticSeverity.Error ? "error" : "warning")} [{diagnostic.Code}] {diagnostic.Project}: {diagnostic.Message}");
+            foreach (var diagnostic in report.Diagnostics.Where(d => d.Severity != DiagnosticSeverity.Error))
+                Console.Error.WriteLine($"warning [{diagnostic.Code}] {diagnostic.Project}: {diagnostic.Message}");
             Console.WriteLine($"Report: {output}");
             if (options.Open)
             {
                 try { Process.Start(new ProcessStartInfo(new Uri(output).AbsoluteUri) { UseShellExecute = true }); }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { Console.Error.WriteLine($"Could not open browser: {ex.Message}"); }
             }
-            if (options.FailOnIncomplete && (errors > 0 || report.Projects.Any(p => !p.Resolved))) return 3;
+            WriteErrors(errors);
+            if (options.FailOnIncomplete && (errors.Count > 0 || report.Projects.Any(p => !p.Resolved))) return 3;
             return options.FailOnDrift && drift > 0 ? 2 : 0;
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or InvalidOperationException or System.Xml.XmlException or System.Text.Json.JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or KeyNotFoundException)
         {
             RetroConsole.Finish(success: false, "Report generation failed.", ex.Message);
-            Console.Error.WriteLine($"nuget-map: {ex.Message}");
+            WriteErrors([new Diagnostic(ex.GetType().Name, ex.Message, null, DiagnosticSeverity.Error)]);
             return 1;
+        }
+    }
+
+    private static string Count(int errors) => $"{errors} error{(errors == 1 ? "" : "s")}";
+
+    /// <summary>
+    /// Parse failures and exceptions are what the run has to be judged on, so they are written last,
+    /// after the summary, the warnings and the report path. A long scan must never bury them.
+    /// </summary>
+    private static void WriteErrors(IReadOnlyList<Diagnostic> errors)
+    {
+        if (errors.Count == 0) return;
+        Console.Out.Flush();
+        Console.Error.WriteLine();
+        Console.Error.WriteLine($"{Count(errors.Count)}:");
+        for (var i = 0; i < errors.Count; i++)
+        {
+            var (code, message, project) = (errors[i].Code, errors[i].Message, errors[i].Project);
+            Console.Error.WriteLine(string.IsNullOrEmpty(project)
+                ? $"  {i + 1,2}. [{code}] {message}"
+                : $"  {i + 1,2}. [{code}] {project}{Environment.NewLine}      {message}");
         }
     }
 

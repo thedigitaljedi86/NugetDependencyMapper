@@ -101,7 +101,25 @@ dotnet nuget-map --help
 
 HTML/JSON bliver stadig skrevet ved kode `2` og `3`. Kode `3` har prioritet over `2`. Eksisterende rapportfiler på de valgte outputstier overskrives.
 
-Analysebemærkninger har to niveauer. **Fejl** betyder, at rapporten mangler data, den burde have haft: `MISSING_PROJECT`, `INVALID_ASSETS`, `INVALID_PROJECT`, `RESTORE_FAILED` og NuGet-logposter med `level: Error`. **Advarsler** er oplysende: `STALE_RESTORE`, `DECLARED_ONLY`, `TARGET_METADATA`, `UNRESOLVED_EDGE`, `LEGACY_PACKAGES` og NuGets egne advarsler som `NU1603` og `NU1701`. `--fail-on-incomplete` udløses af fejl og af projekter uden restore-data — ikke af advarsler alene, så et almindeligt repository med et par NuGet-advarsler kan stadig køre grønt i CI. Begge niveauer skrives til stderr med præfikset `error`/`warning` og vises i rapporten, hvor fejl markeres rødt og folder analysebemærkningerne ud automatisk.
+Analysebemærkninger har to niveauer. **Fejl** betyder, at rapporten mangler data, den burde have haft: `MISSING_PROJECT`, `INVALID_ASSETS`, `INVALID_PROJECT`, `RESTORE_FAILED` og NuGet-logposter med `level: Error`. **Advarsler** er oplysende: `STALE_RESTORE`, `DECLARED_ONLY`, `TARGET_METADATA`, `UNRESOLVED_EDGE`, `LEGACY_PACKAGES` og NuGets egne advarsler som `NU1603` og `NU1701`. `--fail-on-incomplete` udløses af fejl og af projekter uden restore-data — ikke af advarsler alene, så et almindeligt repository med et par NuGet-advarsler kan stadig køre grønt i CI. Begge niveauer vises i rapporten, hvor fejl markeres rødt og folder analysebemærkningerne ud automatisk.
+
+I terminalen skrives advarsler løbende med præfikset `warning`, mens **fejl samles i en nummereret liste allersidst** — efter opsummeringen, advarslerne og stien til rapporten. En parsefejl i én projektfil kan dermed ikke drukne i en skærmfuld advarsler fra en stor scanning. Et fatalt nedbrud vises i samme liste, så den sidste udskrift altid er det, der gik galt. Listen skrives til stderr:
+
+```
+Mapped 4 projects and 1 packages. 0 packages have version drift.
+warning [DECLARED_ONLY] Api/Api.csproj: No usable restore graph. …
+Report: /tmp/err.html
+
+3 errors:
+   1. [MISSING_PROJECT] Gone/Gone.csproj
+      The referenced project file does not exist.
+   2. [INVALID_PROJECT] Legacy/Legacy.csproj
+      Name cannot begin with the '<' character, hexadecimal value 0x3C. Line 1, position 74.
+   3. [INVALID_ASSETS] Web/Web.csproj
+      Cannot read restored dependencies: 'o' is an invalid start of a property name. …
+```
+
+Fuldskærmsvisningens slutskærm viser samtidig antallet med rød overskrift (`Report generated with 3 errors.`) i stedet for at melde alt vel.
 
 I en interaktiv terminal skifter værktøjet midlertidigt til en fuldskærmsvisning i klassisk Windows XP-installations-stil: en blå skærm med titellinje, et skærmbillede hvor rapportens navn indtastes (medmindre `--name` er angivet), en "Scanning:"-fremgangslinje mens projekter og pakker analyseres, en tilsvarende fremgangslinje pr. projekt under `--restore`, og til sidst en statusskærm med detaljer. Bundlinjen viser altid "Powered by IT Performance". Skærmen bliver stående — også ved fejl — indtil der trykkes Enter; først da vender terminalen tilbage til normal visning med de sædvanlige linjer (`Mapped …`, `Report: …`, fejlbeskeder) i scrollback. Det er ren pynt og slås automatisk fra, når vinduet er mindre end 40×12, når output eller input omdirigeres (fx i CI/scripts), eller når `NO_COLOR` eller `NUGET_MAP_PLAIN=1` er sat — så scripts og logs er upåvirkede og venter aldrig på et tastetryk. Sæt `NUGET_MAP_PLAIN=1`, hvis du vil have almindeligt linjeoutput i en interaktiv terminal. Fuldskærmsvisningen tegner aldrig bredere eller højere end vinduet og følger med, hvis du ændrer størrelsen undervejs; bliver vinduet for lille, gives terminalen tilbage, og kørslen fortsætter med almindelige linjer.
 

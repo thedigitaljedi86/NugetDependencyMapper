@@ -292,6 +292,38 @@ var tests = new (string Name, Func<Task> Run)[]
             Assert(line.EndsWith("(151 of 300)"), $"the counter survives truncation at width {width}: '{line}'");
         }
     })),
+    ("Parse failures are listed last, after everything else the run prints", async () =>
+    {
+        using var f = new Fixture();
+        var broken = f.Project("Broken", "<PackageReference Include=\"Root\" Version=\"1.0\" />");
+        f.Write("Broken/obj/project.assets.json", "{not valid}");
+        var ok = f.Project("Ok"); f.Assets(ok);
+        f.Log(ok, "NU1603", "Warning", "A restore warning that must not bury the error.");
+        var output = Path.Combine(f.Root, "e.html");
+        var (log, code) = await Capture(() => Cli.Main([f.Root, "--name", "E", "-o", output]));
+        Assert(code == 0, "a parse failure alone does not fail the run");
+        var list = log.IndexOf("1. [INVALID_ASSETS]", StringComparison.Ordinal);
+        Assert(list > 0, $"errors are listed with a number:\n{log}");
+        Assert(log.Contains("1 error:"), $"the list is headed with a count:\n{log}");
+        Assert(list > log.IndexOf("warning [NU1603]", StringComparison.Ordinal), "warnings come before the error list");
+        Assert(list > log.IndexOf("Report: ", StringComparison.Ordinal), "the report path comes before the error list");
+        Assert(list > log.IndexOf("Mapped ", StringComparison.Ordinal), "the summary comes before the error list");
+        // The exact wording of the runtime's JSON exception is not ours to pin, only its placement.
+        var lines = log.ReplaceLineEndings("\n").TrimEnd().Split('\n');
+        Assert(lines[^1].StartsWith("      Cannot read restored dependencies:", StringComparison.Ordinal),
+            $"the error message is the very last line:\n{log}");
+        Assert(lines[^2].Contains("1. [INVALID_ASSETS] Broken/Broken.csproj", StringComparison.Ordinal),
+            $"its heading is immediately above:\n{log}");
+    }),
+    ("A fatal exception is reported through the same final list", async () =>
+    {
+        using var f = new Fixture();
+        var (log, code) = await Capture(() => Cli.Main(["--demo", "--name", "E", "-o", Path.Combine(f.Root, "report.txt")]));
+        Assert(code == 1, "invalid output extension fails the run");
+        Assert(log.Contains("1 error:") && log.Contains("1. [ArgumentException] Output must use the .html extension"),
+            $"the exception is listed like any other error:\n{log}");
+        Assert(log.TrimEnd().EndsWith(".html extension: " + Path.Combine(f.Root, "report.txt")), $"nothing follows the list:\n{log}");
+    }),
     ("No projects is an error, not an empty successful report", () => Check(f =>
     {
         try { Analyzer.Analyze(f.Root); throw new Exception("Expected failure"); }
@@ -308,6 +340,20 @@ Console.WriteLine($"{tests.Length - failures}/{tests.Length} tests passed.");
 return failures == 0 ? 0 : 1;
 
 static Task Check(Action<Fixture> run) { using var fixture = new Fixture(); run(fixture); return Task.CompletedTask; }
+
+/// <summary>Runs the CLI with stdout and stderr merged, so the order they were written in is testable.</summary>
+static async Task<(string Log, int Code)> Capture(Func<Task<int>> run)
+{
+    var (stdout, stderr) = (Console.Out, Console.Error);
+    var log = new StringWriter();
+    Console.SetOut(log); Console.SetError(log);
+    try
+    {
+        var code = await run();
+        return (log.ToString(), code);
+    }
+    finally { Console.SetOut(stdout); Console.SetError(stderr); }
+}
 static void Assert(bool condition, string message) { if (!condition) throw new Exception(message); }
 
 sealed class Fixture : IDisposable

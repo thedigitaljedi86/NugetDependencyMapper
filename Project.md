@@ -13,6 +13,7 @@ Målet er et udviklerværktøj, der kan køres som `dotnet nuget-map` og omsætt
 - Selvstændig HTML uden eksterne scripts, server eller internetkrav.
 - Tydelig markering af manglende restore-data og illustrative demo-data.
 - Analysebemærkninger har fejl- og advarselsniveau; kun fejl og manglende restore-data udløser `--fail-on-incomplete`.
+- Parsefejl og exceptions samles i en nummereret liste allersidst i terminaludskriften.
 - Licensmetadata pr. pakkeversion med licensudtryk, licensfil, licenslink, ukendt status og krav om licensaccept samt filtrering i pakkeoversigten.
 - Rekursiv scanning af flere repositories i én rapport; projekter identificeres via deres stier.
 - Footer med “Powered by IT Performance” og link til https://itperformance.dk.
