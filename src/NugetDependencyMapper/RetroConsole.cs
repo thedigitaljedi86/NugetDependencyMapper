@@ -95,7 +95,8 @@ internal static class RetroConsole
         Console.SetCursorPosition(0, 0);
         Console.Write(Fit($"  {_title}", _width));
         Console.SetCursorPosition(0, 1);
-        Console.Write(new string('─', _width));
+        // The double line the original text-mode setup ruled its title off with.
+        Console.Write(new string('═', _width));
         WriteFooter();
     }
 
