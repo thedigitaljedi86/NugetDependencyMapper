@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Text;
 
 namespace NugetDependencyMapper;
@@ -11,12 +12,11 @@ public static class Program
         {
             var options = Options.Parse(args);
             if (options.Help) { Console.WriteLine(Options.HelpText); return 0; }
-            if (options.Version) { Console.WriteLine("nuget-map 0.1.0"); return 0; }
+            if (options.Version) { Console.WriteLine($"nuget-map {Version}"); return 0; }
             var output = Path.GetFullPath(options.Output);
             var json = options.Json is null ? null : Path.GetFullPath(options.Json);
             ValidateOutput(output, ".html");
             if (json is not null) ValidateOutput(json, ".json");
-            if (json == output) throw new ArgumentException("HTML and JSON output must have different paths.");
             if (options.Name is null && Console.IsInputRedirected)
                 throw new ArgumentException("Specify --name <report name> when running without an interactive terminal.");
             RetroConsole.Begin("NuGet Dependency Mapper");
@@ -39,23 +39,27 @@ public static class Program
                     RetroConsole.Progress(input, index, inputs.Count);
                     int exitCode;
                     string? startFailure = null;
+                    var captured = string.Empty;
                     try
                     {
+                        // The full-screen UI owns the terminal, so restore output has to be captured
+                        // rather than printed; without the UI it streams straight to the console.
+                        var capture = RetroConsole.Enabled;
                         var start = new ProcessStartInfo("dotnet")
                         {
                             UseShellExecute = false,
                             WorkingDirectory = Path.GetDirectoryName(input)!,
-                            RedirectStandardOutput = RetroConsole.Enabled,
-                            RedirectStandardError = RetroConsole.Enabled,
+                            RedirectStandardOutput = capture,
+                            RedirectStandardError = capture,
                         };
                         start.ArgumentList.Add("restore");
                         start.ArgumentList.Add(input);
                         using var process = Process.Start(start) ?? throw new InvalidOperationException("Unable to start dotnet restore.");
-                        var drain = RetroConsole.Enabled
+                        var drain = capture
                             ? Task.WhenAll(process.StandardOutput.ReadToEndAsync(), process.StandardError.ReadToEndAsync())
-                            : Task.CompletedTask;
+                            : null;
                         await process.WaitForExitAsync();
-                        await drain;
+                        if (drain is not null) captured = string.Join('\n', await drain);
                         exitCode = process.ExitCode;
                     }
                     catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
@@ -66,6 +70,8 @@ public static class Program
                     if (exitCode != 0)
                     {
                         var reason = startFailure ?? $"exit code {exitCode}";
+                        var detail = Tail(captured);
+                        if (detail.Length > 0) reason += $"; {detail}";
                         if (!options.ContinueOnRestoreError) throw new InvalidOperationException($"dotnet restore failed for {input} ({reason}). No report was generated.");
                         Console.Error.WriteLine($"nuget-map: dotnet restore failed for {input} ({reason}). Continuing with the remaining projects.");
                         failed.Add((input, reason));
@@ -80,7 +86,7 @@ public static class Program
                 var project = report.Projects.FirstOrDefault(p => string.Equals(p.Path, failedInput, comparison));
                 report.Diagnostics.Add(new Diagnostic("RESTORE_FAILED",
                     $"dotnet restore failed ({reason}). Package versions and dependency chains may be missing or stale until this is fixed and the report is regenerated.",
-                    project?.Id ?? Path.GetFileName(failedInput)));
+                    project?.Id ?? Path.GetFileName(failedInput), DiagnosticSeverity.Error));
             }
             report.Name = reportName;
             Directory.CreateDirectory(Path.GetDirectoryName(output)!);
@@ -91,24 +97,63 @@ public static class Program
                 await File.WriteAllTextAsync(json, HtmlReport.Json(report), new UTF8Encoding(false));
             }
             var drift = report.Packages.Count(p => p.HasVersionDrift);
-            RetroConsole.Finish(success: true, "Report generated successfully.", "Report saved to:", $"  {output}");
+            var errors = report.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+            RetroConsole.Finish(success: errors.Count == 0,
+                errors.Count == 0 ? "Report generated successfully." : $"Report generated with {Count(errors.Count)}.",
+                "Report saved to:", $"  {output}");
             Console.WriteLine($"Mapped {report.Projects.Count} projects and {report.Packages.Count} packages. {drift} packages have version drift.");
-            foreach (var diagnostic in report.Diagnostics) Console.Error.WriteLine($"[{diagnostic.Code}] {diagnostic.Project}: {diagnostic.Message}");
+            foreach (var diagnostic in report.Diagnostics.Where(d => d.Severity != DiagnosticSeverity.Error))
+                Console.Error.WriteLine($"warning [{diagnostic.Code}] {diagnostic.Project}: {diagnostic.Message}");
             Console.WriteLine($"Report: {output}");
             if (options.Open)
             {
                 try { Process.Start(new ProcessStartInfo(new Uri(output).AbsoluteUri) { UseShellExecute = true }); }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { Console.Error.WriteLine($"Could not open browser: {ex.Message}"); }
             }
-            if (options.FailOnIncomplete && (report.Diagnostics.Count > 0 || report.Projects.Any(p => !p.Resolved))) return 3;
+            WriteErrors(errors);
+            if (options.FailOnIncomplete && (errors.Count > 0 || report.Projects.Any(p => !p.Resolved))) return 3;
             return options.FailOnDrift && drift > 0 ? 2 : 0;
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or InvalidOperationException or System.Xml.XmlException or System.Text.Json.JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or KeyNotFoundException)
         {
             RetroConsole.Finish(success: false, "Report generation failed.", ex.Message);
-            Console.Error.WriteLine($"nuget-map: {ex.Message}");
+            WriteErrors([new Diagnostic(ex.GetType().Name, ex.Message, null, DiagnosticSeverity.Error)]);
             return 1;
         }
+    }
+
+    private static string Count(int errors) => $"{errors} error{(errors == 1 ? "" : "s")}";
+
+    /// <summary>
+    /// Parse failures and exceptions are what the run has to be judged on, so they are written last,
+    /// after the summary, the warnings and the report path. A long scan must never bury them.
+    /// </summary>
+    private static void WriteErrors(IReadOnlyList<Diagnostic> errors)
+    {
+        if (errors.Count == 0) return;
+        Console.Out.Flush();
+        Console.Error.WriteLine();
+        Console.Error.WriteLine($"{Count(errors.Count)}:");
+        for (var i = 0; i < errors.Count; i++)
+        {
+            var (code, message, project) = (errors[i].Code, errors[i].Message, errors[i].Project);
+            Console.Error.WriteLine(string.IsNullOrEmpty(project)
+                ? $"  {i + 1,2}. [{code}] {message}"
+                : $"  {i + 1,2}. [{code}] {project}{Environment.NewLine}      {message}");
+        }
+    }
+
+    /// <summary>The package version, so <c>--version</c> cannot drift away from what was shipped.</summary>
+    public static string Version =>
+        typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
+        ?? typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+
+    /// <summary>The last few meaningful lines of captured build output, for a one-line failure reason.</summary>
+    private static string Tail(string output, int lines = 3, int maxLength = 400)
+    {
+        var meaningful = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var text = string.Join(" | ", meaningful.TakeLast(lines));
+        return text.Length > maxLength ? text[..maxLength] + "…" : text;
     }
 
     public static string ReadReportName(TextReader input, TextWriter output)
@@ -195,7 +240,7 @@ public sealed class Options
         --assets-root <folder>   Find custom project.assets.json paths by project identity
         --open                   Open the report in your default browser
         --fail-on-drift           Exit 2 when resolved package versions differ
-        --fail-on-incomplete      Exit 3 on incomplete data or restore diagnostics
+        --fail-on-incomplete      Exit 3 on missing restore data or error-level notes
         --demo                   Generate a clearly marked, illustrative sample
         -h, --help               Show help
         --version                Show version
@@ -203,7 +248,10 @@ public sealed class Options
         Reads existing restore graphs by default. No network calls or MSBuild execution
         unless --restore is requested. Exit codes: 0 success, 1 error, 2 drift,
         3 incomplete (takes precedence over drift). Reports are still written for 2/3.
+        --fail-on-incomplete reacts to unresolved projects and error-level notes;
+        NuGet's own warnings are reported but do not fail the run.
         Non-interactive runs require --name. The report title does not change the
         output filename; use --output to choose that separately.
+        Set NUGET_MAP_PLAIN=1 or NO_COLOR to skip the full-screen terminal UI.
         """;
 }

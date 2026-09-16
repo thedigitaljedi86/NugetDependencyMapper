@@ -58,7 +58,7 @@ På Windows bruges `.\.tools\dotnet-nuget-map.exe`. Tilføj `.tools` til `PATH`,
 
 - **Projekt → pakker:** Vælg et projekt og se direkte og transitive referencer pr. framework/runtime.
 - **Pakke → projekter:** Vælg en pakke, og midtergrafen skifter til at vise alle projekter, der er afhængige af den, med version pr. projekt. Listen kan eksporteres til CSV (projektnavn og version).
-- **Namespace-filter:** Skjul pakker efter præfiks (fx `Microsoft`, `System`) i både grafen, pakkeoversigten og versionsforskelle. Filteret huskes i browserens `localStorage`.
+- **Namespace-filter:** Skjul pakker efter præfiks (fx `Microsoft`, `System`) i grafen, pakkeoversigten, versionsforskelle og tallene øverst i rapporten. Filteret huskes i browserens `localStorage`.
 - **Versionsforskelle:** Pakker med flere gendannede versioner markeres i grafen og samles i en tabel sorteret efter antal berørte projekter.
 - **Afhængighedskæder:** “Why is it here?” viser veje fra projektet gennem pakker og projektreferencer til den valgte pakke.
 - **Navigation:** Søgning, klikbare grafnoder, zoom, panorering, dybdevalg og framework/runtime-vælger. Grafnoder kan aktiveres med Enter eller mellemrum; `/` fokuserer søgefeltet.
@@ -97,11 +97,29 @@ dotnet nuget-map --help
 | `0` | Rapport genereret |
 | `1` | Ugyldigt input, læse-/skrivefejl eller restore fejlede |
 | `2` | `--fail-on-drift` og flere gendannede versioner af samme pakke |
-| `3` | `--fail-on-incomplete` og manglende restore-data eller analysebemærkninger |
+| `3` | `--fail-on-incomplete` og manglende restore-data eller analysebemærkninger på fejlniveau |
 
-HTML/JSON bliver stadig skrevet ved kode `2` og `3`. Kode `3` har prioritet over `2`. `--fail-on-incomplete` er konservativ: også NuGet-advarsler og en muligvis forældet restore udløser den. Eksisterende rapportfiler på de valgte outputstier overskrives.
+HTML/JSON bliver stadig skrevet ved kode `2` og `3`. Kode `3` har prioritet over `2`. Eksisterende rapportfiler på de valgte outputstier overskrives.
 
-I en interaktiv terminal skifter værktøjet midlertidigt til en fuldskærmsvisning i klassisk Windows XP-installations-stil: en blå skærm med titellinje, et skærmbillede hvor rapportens navn indtastes (medmindre `--name` er angivet), en "Scanning:"-fremgangslinje mens projekter og pakker analyseres, en tilsvarende fremgangslinje pr. projekt under `--restore`, og til sidst en statusskærm med detaljer. Bundlinjen viser altid "Powered by IT Performance". Skærmen bliver stående — også ved fejl — indtil der trykkes Enter; først da vender terminalen tilbage til normal visning med de sædvanlige linjer (`Mapped …`, `Report: …`, fejlbeskeder) i scrollback. Det er ren pynt og slås automatisk fra, når output eller input omdirigeres (fx i CI/scripts) eller `NO_COLOR` er sat — så scripts og logs er upåvirkede og venter aldrig på et tastetryk.
+Analysebemærkninger har to niveauer. **Fejl** betyder, at rapporten mangler data, den burde have haft: `MISSING_PROJECT`, `INVALID_ASSETS`, `INVALID_PROJECT`, `RESTORE_FAILED` og NuGet-logposter med `level: Error`. **Advarsler** er oplysende: `STALE_RESTORE`, `DECLARED_ONLY`, `TARGET_METADATA`, `UNRESOLVED_EDGE`, `LEGACY_PACKAGES` og NuGets egne advarsler som `NU1603` og `NU1701`. `--fail-on-incomplete` udløses af fejl og af projekter uden restore-data — ikke af advarsler alene, så et almindeligt repository med et par NuGet-advarsler kan stadig køre grønt i CI. Begge niveauer vises i rapporten, hvor fejl markeres rødt og folder analysebemærkningerne ud automatisk.
+
+I terminalen skrives advarsler løbende med præfikset `warning`, mens **fejl samles i en nummereret liste allersidst** — efter opsummeringen, advarslerne og stien til rapporten. En parsefejl i én projektfil kan dermed ikke drukne i en skærmfuld advarsler fra en stor scanning. Et fatalt nedbrud vises i samme liste, så den sidste udskrift altid er det, der gik galt. Listen skrives til stderr:
+
+![Terminaludskrift der slutter med en nummereret liste over fejl](docs/images/cli-errors.png)
+
+Fuldskærmsvisningens slutskærm viser samtidig antallet med rød overskrift (`Report generated with 3 errors.`) i stedet for at melde alt vel.
+
+I en interaktiv terminal skifter værktøjet midlertidigt til en fuldskærmsvisning i klassisk Windows XP-installations-stil: en blå skærm med titellinje, et skærmbillede hvor rapportens navn indtastes (medmindre `--name` er angivet), en "Scanning:"-fremgangslinje mens projekter og pakker analyseres, en tilsvarende fremgangslinje pr. projekt under `--restore`, og til sidst en statusskærm med detaljer. Bundlinjen viser altid "Powered by IT Performance". Skærmen bliver stående — også ved fejl — indtil der trykkes Enter; først da vender terminalen tilbage til normal visning med de sædvanlige linjer (`Mapped …`, `Report: …`, fejlbeskeder) i scrollback. Det er ren pynt og slås automatisk fra, når vinduet er mindre end 40×12, når output eller input omdirigeres (fx i CI/scripts), eller når `NO_COLOR` eller `NUGET_MAP_PLAIN=1` er sat — så scripts og logs er upåvirkede og venter aldrig på et tastetryk. Sæt `NUGET_MAP_PLAIN=1`, hvis du vil have almindeligt linjeoutput i en interaktiv terminal. Fuldskærmsvisningen tegner aldrig bredere eller højere end vinduet og følger med, hvis du ændrer størrelsen undervejs; bliver vinduet for lille, gives terminalen tilbage, og kørslen fortsætter med almindelige linjer.
+
+Skærmen hvor rapportens navn indtastes:
+
+![Skærmen hvor rapportens navn indtastes](docs/images/cli-naming.png)
+
+Fremgangslinjen under analysen, og statusskærmen til sidst:
+
+![Fremgangslinje under scanning](docs/images/cli-scanning.png)
+
+![Statusskærm når rapporten er skrevet](docs/images/cli-finish.png)
 
 ## Datagrundlag og afgrænsninger
 
@@ -145,14 +163,17 @@ dotnet run --project tests/NugetDependencyMapper.Tests
 dotnet pack src/NugetDependencyMapper -c Release -o artifacts
 ```
 
-Browser-smoketesten er valgfri og kræver Node.js samt Playwright; det er udviklingsværktøjer og bliver ikke en del af HTML-rapporten:
+Browser-smoketesten kræver Node.js samt Playwright; det er udviklingsværktøjer og bliver ikke en del af HTML-rapporten. Den kører også i CI og lægger skærmbillederne op som build-artifact:
 
 ```bash
 dotnet run --project src/NugetDependencyMapper -- --demo --name "Northstar Commerce" -o artifacts/nuget-map-demo.html
+dotnet run --project src/NugetDependencyMapper -- tests/browser/fixture --name "Diagnostics fixture" -o artifacts/nuget-map-diagnostics.html
 npm install --prefix tests/browser
 npx --prefix tests/browser playwright install chromium
 node tests/browser/smoke.cjs
 ```
+
+Den anden rapport bygges på `tests/browser/fixture`, et projekt der bevidst ikke kan gendannes, så testen dækker både fejl- og advarselsniveau i analysebemærkningerne. Testen fejler, hvis rapporten laver ét eneste netværkskald — det er værnet om, at rapporten forbliver offline.
 
 ## Udgivelse
 
@@ -163,6 +184,8 @@ Et push af et tag i formatet `vX.Y.Z` udløser [.github/workflows/release.yml](.
 git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
+
+Workflowet afviser et tag, der ikke matcher `<Version>` i csproj-filen, så en glemt version-bump ikke stille publicerer den forrige version. `--version` læser samme nummer fra assemblyen.
 
 Hvert push til `main` kører desuden [.github/workflows/ci.yml](.github/workflows/ci.yml) (build, test, pack-verifikation) uden at publicere noget.
 

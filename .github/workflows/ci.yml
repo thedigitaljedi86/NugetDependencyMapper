@@ -28,3 +28,39 @@ jobs:
 
       - name: Pack (verification only)
         run: dotnet pack src/NugetDependencyMapper -c Release -o artifacts --no-build
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Generate report fixtures
+        run: |
+          dotnet run --project src/NugetDependencyMapper -c Release -- --demo --name "Northstar Commerce" -o artifacts/nuget-map-demo.html
+          dotnet run --project src/NugetDependencyMapper -c Release -- tests/browser/fixture --name "Diagnostics fixture" -o artifacts/nuget-map-diagnostics.html
+
+      - name: Install Playwright
+        run: |
+          npm ci --prefix tests/browser
+          npx --prefix tests/browser playwright install --with-deps chromium
+
+      - name: Smoke test the report
+        run: node tests/browser/smoke.cjs
+
+      - name: Upload report screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-screenshots
+          path: artifacts/*.png
+          if-no-files-found: ignore

@@ -44,6 +44,8 @@ public static class AssetsReader
                 else diagnostics.Add(new("TARGET_METADATA", $"Cannot match direct dependency metadata for {target.Name}. Package versions and edges are available, but direct classification may be incomplete.", project.Id));
             }
             var entries = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            // Keys we kept, for O(1) membership tests while walking the same libraries a second time.
+            var kept = new HashSet<string>(StringComparer.Ordinal);
             foreach (var library in target.Value.EnumerateObject())
             {
                 var slash = library.Name.LastIndexOf('/');
@@ -53,21 +55,31 @@ public static class AssetsReader
                 var type = library.Value.TryGetProperty("type", out var value) ? value.GetString() : null;
                 if (type is not ("package" or "project")) continue;
                 entries[id] = library.Name;
+                kept.Add(library.Name);
                 if (type == "project") graph.ProjectLibraries[library.Name] = id;
                 else graph.Packages.Add(new(library.Name, id, version, direct.ContainsKey(id), direct.GetValueOrDefault(id), true, licenseReader.Read(root, library.Name, id)));
             }
+            // Framework-provided and excluded dependencies are legitimately absent from the graph and
+            // can number in the hundreds, so report them once per target instead of once per edge.
+            var unresolved = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var library in target.Value.EnumerateObject())
             {
-                if (!entries.ContainsValue(library.Name) || !library.Value.TryGetProperty("dependencies", out var childDependencies)) continue;
+                if (!kept.Contains(library.Name) || !library.Value.TryGetProperty("dependencies", out var childDependencies)) continue;
                 foreach (var dependency in childDependencies.EnumerateObject())
                 {
                     if (entries.TryGetValue(dependency.Name, out var key)) graph.Edges.Add(new(library.Name, key, dependency.Value.ToString()));
-                    else diagnostics.Add(new("UNRESOLVED_EDGE", $"{target.Name}: {library.Name} requires {dependency.Name}, which is absent from the restored graph.", project.Id));
+                    else unresolved.Add(dependency.Name);
                 }
             }
+            if (unresolved.Count > 0)
+                diagnostics.Add(new("UNRESOLVED_EDGE",
+                    $"{target.Name}: {unresolved.Count} dependenc{(unresolved.Count == 1 ? "y is" : "ies are")} absent from the restored graph " +
+                    $"({Summarize(unresolved)}). These are usually provided by the shared framework or excluded through PrivateAssets/ExcludeAssets.",
+                    project.Id));
             graph.Roots.AddRange(graph.Packages.Where(p => p.Direct).Select(p => p.Key));
             // Referenced projects are additional entry points for inherited package chains.
-            graph.Roots.AddRange(graph.ProjectLibraries.Keys.Where(key => !graph.Edges.Any(e => e.To == key && graph.ProjectLibraries.ContainsKey(e.From))));
+            var referencedByProject = new HashSet<string>(graph.Edges.Where(e => graph.ProjectLibraries.ContainsKey(e.From)).Select(e => e.To), StringComparer.Ordinal);
+            graph.Roots.AddRange(graph.ProjectLibraries.Keys.Where(key => !referencedByProject.Contains(key)));
             project.Targets.Add(graph);
         }
         if (project.Targets.Count == 0) throw new InvalidDataException("The assets file has no restored targets.");
@@ -75,6 +87,15 @@ public static class AssetsReader
         if (root.TryGetProperty("logs", out var logs))
             foreach (var log in logs.EnumerateArray())
                 diagnostics.Add(new(log.TryGetProperty("code", out var code) ? code.ToString() : "NUGET",
-                    log.TryGetProperty("message", out var message) ? message.ToString() : log.ToString(), project.Id));
+                    log.TryGetProperty("message", out var message) ? message.ToString() : log.ToString(), project.Id,
+                    // NuGet's own warnings (NU1603, NU1701, ...) are common in healthy repositories.
+                    log.TryGetProperty("level", out var level) && string.Equals(level.GetString(), "Error", StringComparison.OrdinalIgnoreCase)
+                        ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning));
+    }
+
+    private static string Summarize(IEnumerable<string> names)
+    {
+        var listed = names.Take(5).ToList();
+        return string.Join(", ", listed) + (names.Count() > listed.Count ? ", …" : "");
     }
 }
