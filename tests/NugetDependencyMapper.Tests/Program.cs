@@ -277,6 +277,21 @@ var tests = new (string Name, Func<Task> Run)[]
         var json = HtmlReport.Json(report);
         Assert(json.Contains("\"severity\":\"error\"") && json.Contains("\"severity\":\"warning\""), "severity is exported as a string the report can read");
     })),
+    ("Terminal chrome fits every window it claims to support", () => Check(_ =>
+    {
+        Assert(!RetroConsole.SupportsChrome(39, 40), "too narrow for the frame");
+        Assert(!RetroConsole.SupportsChrome(80, 11), "too short for the frame");
+        Assert(RetroConsole.SupportsChrome(40, 12), "smallest supported window");
+        for (var width = 40; width <= 200; width++)
+        {
+            // DrawContent indents by two and Fit clips anything reaching the right edge.
+            var bar = $"[{RetroConsole.Bar(7, 300, width)}] {RetroConsole.Fit("100", 3)}%";
+            Assert(("  " + bar).Length < width, $"progress bar fits at width {width}: {bar.Length + 2} columns");
+            var line = RetroConsole.Line("Scanning:", "/a/very/long/path/SomeVeryLongProjectName.csproj", "(151 of 300)", width);
+            Assert(("  " + line).Length < width, $"scan line fits at width {width}: '{line}'");
+            Assert(line.EndsWith("(151 of 300)"), $"the counter survives truncation at width {width}: '{line}'");
+        }
+    })),
     ("No projects is an error, not an empty successful report", () => Check(f =>
     {
         try { Analyzer.Analyze(f.Root); throw new Exception("Expected failure"); }

@@ -14,6 +14,10 @@ internal static class RetroConsole
     private const string Footer = "Powered by IT Performance";
     private const int HeaderRows = 3;
     private const int FooterRows = 1;
+    // Below this the chrome cannot be drawn without wrapping, which scrolls the title and
+    // the status bar off screen. A smaller window gets plain line output instead.
+    private const int MinWidth = 40;
+    private const int MinHeight = 12;
 
     /// <summary>
     /// The chrome is purely decorative and takes over the terminal, so it only runs when both
@@ -24,34 +28,84 @@ internal static class RetroConsole
         && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_MAP_PLAIN"));
 
     private static bool _active;
+    private static bool _entered;
+    private static string _title = "";
     private static int _width;
     private static int _height;
+    private static int _observedWidth;
+    private static int _observedHeight;
 
     public static void Begin(string title)
     {
         if (!Enabled) return;
         try
         {
-            _width = Math.Clamp(Console.WindowWidth, 40, 200);
-            _height = Math.Clamp(Console.WindowHeight, 12, 60);
+            _title = title;
+            // Measured before anything is written, so a window too small for the chrome
+            // leaves the terminal completely untouched.
+            if (!Measure()) return;
             Console.Out.Write(EnterAltScreen);
+            _entered = true;
             Console.CursorVisible = false;
-            Console.BackgroundColor = ConsoleColor.Blue;
-            Console.ForegroundColor = ConsoleColor.White;
-            for (var row = 0; row < _height; row++)
-            {
-                Console.SetCursorPosition(0, row);
-                Console.Write(new string(' ', _width));
-            }
-            Console.SetCursorPosition(0, 0);
-            Console.Write(Fit($"  {title}", _width));
-            Console.SetCursorPosition(0, 1);
-            Console.Write(new string('─', _width));
-            WriteFooter();
+            Paint();
             _active = true;
             Console.CancelKeyPress += RestoreTerminalOnCancel;
         }
-        catch { _active = false; }
+        catch { Restore(); }
+    }
+
+    /// <summary>
+    /// Caches the drawable area. Never wider or taller than the real window: longer lines wrap
+    /// and push the header and footer out of view.
+    /// </summary>
+    private static bool Measure()
+    {
+        var width = Console.WindowWidth;
+        var height = Console.WindowHeight;
+        if (!SupportsChrome(width, height)) return false;
+        _observedWidth = width;
+        _observedHeight = height;
+        _width = Math.Min(width, 200);
+        _height = Math.Min(height, 60);
+        return true;
+    }
+
+    /// <summary>Follows a window resize, and stands down if the window became too small.</summary>
+    private static bool Resync()
+    {
+        if (!_active) return false;
+        if (Console.WindowWidth == _observedWidth && Console.WindowHeight == _observedHeight) return true;
+        if (!Measure()) { Restore(); return false; }
+        Paint();
+        return true;
+    }
+
+    private static void Paint()
+    {
+        Console.BackgroundColor = ConsoleColor.Blue;
+        Console.ForegroundColor = ConsoleColor.White;
+        for (var row = 0; row < _height; row++)
+        {
+            Console.SetCursorPosition(0, row);
+            Console.Write(new string(' ', _width));
+        }
+        Console.SetCursorPosition(0, 0);
+        Console.Write(Fit($"  {_title}", _width));
+        Console.SetCursorPosition(0, 1);
+        Console.Write(new string('─', _width));
+        WriteFooter();
+    }
+
+    /// <summary>Hands the terminal back. Safe to call more than once, and when nothing was drawn.</summary>
+    private static void Restore()
+    {
+        _active = false;
+        Console.CancelKeyPress -= RestoreTerminalOnCancel;
+        if (!_entered) return;
+        _entered = false;
+        try { Console.ResetColor(); } catch { /* best effort */ }
+        try { Console.CursorVisible = true; } catch { /* best effort */ }
+        try { Console.Out.Write(ExitAltScreen); } catch { /* best effort */ }
     }
 
     public static void Welcome(string headline, params string[] lines)
@@ -63,7 +117,7 @@ internal static class RetroConsole
             content.AddRange(lines);
             DrawContent(content);
         }
-        catch { _active = false; }
+        catch { Restore(); }
     }
 
     public static void Progress(string projectPath, int current, int total)
@@ -76,12 +130,12 @@ internal static class RetroConsole
                 "Restoring NuGet packages for your projects.",
                 "This might take a few minutes.",
                 string.Empty,
-                $"Restoring:  {Path.GetFileName(projectPath)}  ({current} of {total})",
+                Line("Restoring:", projectPath, $"({current} of {total})", _width),
                 string.Empty,
-                $"[{Bar(current, total)}] {Percent(current, total),3}%",
+                $"[{Bar(current, total, _width)}] {Percent(current, total),3}%",
             ]);
         }
-        catch { _active = false; }
+        catch { Restore(); }
     }
 
     public static void Scanning(string projectPath, int current, int total)
@@ -94,12 +148,12 @@ internal static class RetroConsole
                 "Mapping projects and packages.",
                 "This might take a moment for large solutions.",
                 string.Empty,
-                $"Scanning:  {Path.GetFileName(projectPath)}  ({current} of {total})",
+                Line("Scanning:", projectPath, $"({current} of {total})", _width),
                 string.Empty,
-                $"[{Bar(current, total)}] {Percent(current, total),3}%",
+                $"[{Bar(current, total, _width)}] {Percent(current, total),3}%",
             ]);
         }
-        catch { _active = false; }
+        catch { Restore(); }
     }
 
     /// <summary>
@@ -150,12 +204,25 @@ internal static class RetroConsole
             Console.CursorVisible = false;
             return name.ToString().Trim();
         }
-        catch { _active = false; return null; }
+        catch { Restore(); return null; }
     }
 
-    private static string Bar(int current, int total)
+    /// <summary>Whether the window can hold the chrome at all.</summary>
+    internal static bool SupportsChrome(int width, int height) => width >= MinWidth && height >= MinHeight;
+
+    /// <summary>Keeps the trailing counter visible by shortening the file name instead.</summary>
+    internal static string Line(string label, string projectPath, string suffix, int width)
     {
-        const int barWidth = 40;
+        var name = Path.GetFileName(projectPath);
+        var room = width - label.Length - suffix.Length - 7;
+        if (name.Length > room) name = room > 1 ? name[..(room - 1)] + "…" : "";
+        return $"{label}  {name}  {suffix}";
+    }
+
+    internal static string Bar(int current, int total, int width)
+    {
+        // "  [bar] 100%" has to fit the content width, which Fit would otherwise clip.
+        var barWidth = Math.Clamp(width - 12, 10, 40);
         var filled = total <= 0 ? barWidth : Math.Clamp((int)Math.Round(barWidth * (double)current / total), 0, barWidth);
         return new string('█', filled) + new string('░', barWidth - filled);
     }
@@ -179,20 +246,11 @@ internal static class RetroConsole
         catch { /* purely decorative; never fail the run over a rendering hiccup */ }
         finally
         {
-            Console.CancelKeyPress -= RestoreTerminalOnCancel;
-            try { Console.CursorVisible = true; } catch { /* best effort */ }
-            try { Console.Out.Write(ExitAltScreen); } catch { /* best effort */ }
-            _active = false;
+            Restore();
         }
     }
 
-    private static void RestoreTerminalOnCancel(object? sender, ConsoleCancelEventArgs e)
-    {
-        if (!_active) return;
-        _active = false;
-        try { Console.CursorVisible = true; } catch { /* best effort */ }
-        try { Console.Out.Write(ExitAltScreen); } catch { /* best effort */ }
-    }
+    private static void RestoreTerminalOnCancel(object? sender, ConsoleCancelEventArgs e) => Restore();
 
     private static void WriteFooter()
     {
@@ -206,6 +264,7 @@ internal static class RetroConsole
 
     private static void DrawContent(IReadOnlyList<string> lines, ConsoleColor? headlineColor = null)
     {
+        if (!Resync()) return;
         var top = HeaderRows;
         var bottom = _height - FooterRows;
         for (var row = top; row < bottom; row++)
@@ -218,6 +277,6 @@ internal static class RetroConsole
         Console.ForegroundColor = ConsoleColor.White;
     }
 
-    private static string Fit(string text, int width)
+    internal static string Fit(string text, int width)
         => text.Length >= width ? text[..Math.Max(0, width - 1)] : text.PadRight(width);
 }

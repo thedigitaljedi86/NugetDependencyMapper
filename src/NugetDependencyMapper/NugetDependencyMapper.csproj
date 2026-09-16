@@ -17,6 +17,9 @@
     <PackageProjectUrl>https://github.com/thedigitaljedi86/NugetDependencyMapper</PackageProjectUrl>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="NugetDependencyMapper.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <EmbeddedResource Include="Report/*" />
     <EmbeddedResource Include="Report/Fonts/*" />
     <None Include="Report/Fonts/OpenSans.OFL.txt" Pack="true" PackagePath="licenses/" />
