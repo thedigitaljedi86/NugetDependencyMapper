@@ -1,0 +1,11 @@
+<!-- Fixture for the browser smoke test: a project that cannot be restored, so the report renders
+     an error-level note (MISSING_PROJECT) next to warning-level ones. Not part of the solution. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Serilog" Version="4.2.0" />
+    <ProjectReference Include="../Missing/Missing.csproj" />
+  </ItemGroup>
+</Project>

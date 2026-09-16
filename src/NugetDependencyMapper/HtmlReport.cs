@@ -1,11 +1,17 @@
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace NugetDependencyMapper;
 
 public static class HtmlReport
 {
-    public static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = false };
+    public static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
+    };
     public static string Json(DependencyReport report) => JsonSerializer.Serialize(report, JsonOptions);
     public static string Render(DependencyReport report)
     {

@@ -36,7 +36,12 @@ public sealed record LicenseInfo(string Kind, string? Value = null, string? Url 
 }
 public sealed record VersionLicense(string Version, LicenseInfo License);
 public sealed record DependencyEdge(string From, string To, string Requested);
-public sealed record Diagnostic(string Code, string Message, string? Project = null);
+public enum DiagnosticSeverity { Warning, Error }
+/// <summary>
+/// An analysis note. <see cref="DiagnosticSeverity.Error"/> means the report is missing data it
+/// should have had; warnings are advisory and must not, on their own, fail a CI run.
+/// </summary>
+public sealed record Diagnostic(string Code, string Message, string? Project = null, DiagnosticSeverity Severity = DiagnosticSeverity.Warning);
 public sealed record Usage(string Project, string Target, string Key, bool Direct, string? Requested, bool Resolved);
 public sealed class PackageInfo
 {

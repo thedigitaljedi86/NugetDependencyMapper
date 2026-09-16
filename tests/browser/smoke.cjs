@@ -4,10 +4,16 @@ const root = path.resolve(__dirname, '../..');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 (async()=>{
 const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH || undefined,headless:true,args:['--no-sandbox']});
-const page=await browser.newPage({viewport:{width:1536,height:1150},deviceScaleFactor:1});
-const errors=[];page.on('pageerror',e=>errors.push(e.message));
-const remote=[];page.on('request',r=>{if(/^https?:/.test(r.url()))remote.push(r.url())});
-await page.goto(pathToFileURL(path.join(root, 'artifacts/nuget-map-demo.html')).href);
+const errors=[],remote=[];
+// Every report opens in its own context, so localStorage never leaks between them.
+const open=async file=>{
+  const p=await browser.newPage({viewport:{width:1536,height:1150},deviceScaleFactor:1});
+  p.on('pageerror',e=>errors.push(e.message));
+  p.on('request',r=>{if(/^https?:/.test(r.url()))remote.push(r.url())});
+  await p.goto(pathToFileURL(path.join(root, file)).href);
+  return p;
+};
+const page=await open('artifacts/nuget-map-demo.html');
 await page.screenshot({path:path.join(root, 'artifacts/report-desktop.png'),fullPage:true,animations:'disabled'});
 const assert=(value,message)=>{if(!value)throw new Error(message)};
 assert(await page.locator('.graph-node').count()>3,'graph rendered');
@@ -28,11 +34,19 @@ assert((await page.locator('.page-footer').innerText()).includes('Powered by IT 
 assert(await page.locator('.page-footer a', {hasText:'Font Awesome'}).getAttribute('href')==='https://fontawesome.com','icon attribution link');
 await page.locator('[data-view="inventory"]').click();
 const totalPackageRows=await page.locator('#package-table tr').count();
+const stats=async()=>({projects:await page.locator('#project-count').innerText(),packages:await page.locator('#package-count').innerText(),
+  drift:await page.locator('#drift-count').innerText(),badge:await page.locator('#drift-badge').innerText(),transitive:await page.locator('#transitive-count').innerText()});
+const sameStats=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+const unfiltered=await stats();
+assert(sameStats(unfiltered,{projects:'5',packages:'12',drift:'4',badge:'4',transitive:'3'}),'unfiltered headline counts: '+JSON.stringify(unfiltered));
 await page.locator('#ns-filter').fill('Microsoft');
 assert(await page.locator('#package-table tr').count()===totalPackageRows-3,'namespace filter hides matching packages');
 assert(await page.locator('#ns-filter-count').innerText()==='3 hidden','namespace filter hidden count');
+const filtered=await stats();
+assert(sameStats(filtered,{projects:'5',packages:'9',drift:'2',badge:'2',transitive:'1'}),'headline counts follow the namespace filter: '+JSON.stringify(filtered));
 await page.locator('#ns-filter').fill('');
 assert(await page.locator('#package-table tr').count()===totalPackageRows,'namespace filter clears');
+assert(sameStats(await stats(),unfiltered),'headline counts restore when the filter clears');
 await page.locator('#license-filter').selectOption('unknown');
 assert(await page.locator('#package-table tr').count()===1,'unknown license filter');
 await page.locator('#license-filter').selectOption('acceptance');
@@ -68,7 +82,19 @@ const downloadPromise=page.waitForEvent('download');await page.locator('#export'
 await page.setViewportSize({width:390,height:844});
 await page.screenshot({path:path.join(root, 'artifacts/report-mobile.png'),fullPage:true,animations:'disabled'});
 assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'no horizontal mobile overflow');
+const diagnostics=await open('artifacts/nuget-map-diagnostics.html');
+assert(await diagnostics.locator('#diagnostics-section').isVisible(),'analysis notes are shown when present');
+assert(await diagnostics.locator('#diagnostics-section.has-errors').count()===1,'error styling applied to the section');
+assert(await diagnostics.locator('#diagnostics-section details[open]').count()===1,'errors auto-expand the notes panel');
+assert((await diagnostics.locator('#diagnostics-title').innerText()).startsWith('1 error to fix'),'error count in the notes heading');
+const errorRows=diagnostics.locator('#diagnostics-list .diagnostic-error');
+assert(await errorRows.count()===1,'exactly one error-level note');
+assert((await errorRows.innerText()).includes('MISSING_PROJECT'),'the error-level note is the missing project');
+const warningRows=diagnostics.locator('#diagnostics-list .diagnostic:not(.diagnostic-error)');
+assert(await warningRows.count()===1,'warning-level notes are not styled as errors');
+assert((await warningRows.innerText()).includes('DECLARED_ONLY'),'the warning-level note is the declared-only fallback');
+await diagnostics.screenshot({path:path.join(root, 'artifacts/report-diagnostics.png'),fullPage:true,animations:'disabled'});
 assert(errors.length===0,'browser errors: '+errors.join(','));assert(remote.length===0,'unexpected network requests');
-console.log('PASS browser: graph, search, reverse usage, chains, licenses, license filters, footer, drift table, empty state, navigation, depth, zoom, JSON export, responsive layout, offline resources.');
+console.log('PASS browser: graph, search, reverse usage, chains, licenses, license filters, footer, drift table, empty state, navigation, depth, zoom, JSON export, responsive layout, headline counters, diagnostic severity, offline resources.');
 await browser.close();
 })().catch(e=>{console.error(e);process.exit(1)});

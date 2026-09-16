@@ -13,6 +13,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify the tag matches the packaged version
+        run: |
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/NugetDependencyMapper/NugetDependencyMapper.csproj | head -1)
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match <Version>$version</Version> in the csproj. Bump the version before tagging."
+            exit 1
+          fi
+          echo "Publishing version $version"
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:

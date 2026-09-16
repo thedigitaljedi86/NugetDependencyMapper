@@ -10,7 +10,7 @@ public static class Analyzer
         var files = Discovery.Find(input);
         if (files.Count == 0) throw new InvalidOperationException("No .NET projects were found in the selected input.");
         var root = Directory.Exists(input) ? Path.GetFullPath(input) : Path.GetDirectoryName(Path.GetFullPath(input))!;
-        var report = new DependencyReport { Name = Directory.Exists(input) ? new DirectoryInfo(root).Name : Path.GetFileName(input) };
+        var report = new DependencyReport();
         var customAssets = IndexAssets(assetsRoot);
         var licenses = new LicenseReader();
         var scanned = 0;
@@ -21,7 +21,7 @@ public static class Analyzer
             report.Projects.Add(project);
             if (!File.Exists(file))
             {
-                report.Diagnostics.Add(new("MISSING_PROJECT", "The referenced project file does not exist.", project.Id));
+                report.Diagnostics.Add(new("MISSING_PROJECT", "The referenced project file does not exist.", project.Id, DiagnosticSeverity.Error));
                 continue;
             }
             var assets = customAssets.GetValueOrDefault(file) ?? Path.Combine(Path.GetDirectoryName(file)!, "obj", "project.assets.json");
@@ -38,7 +38,7 @@ public static class Analyzer
                 {
                     project.Targets.Clear();
                     project.Resolved = false;
-                    report.Diagnostics.Add(new("INVALID_ASSETS", $"Cannot read restored dependencies: {ex.Message}", project.Id));
+                    report.Diagnostics.Add(new("INVALID_ASSETS", $"Cannot read restored dependencies: {ex.Message}", project.Id, DiagnosticSeverity.Error));
                 }
             }
             ReadDeclared(project, report.Diagnostics);
@@ -88,12 +88,13 @@ public static class Analyzer
                 break;
             }
             var graph = new TargetGraph { Name = "Declarations (unevaluated)" };
+            var declared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var item in document.Descendants().Where(e => e.Name.LocalName == "PackageReference" && e.Attribute("Include") is not null))
             {
                 var id = item.Attribute("Include")!.Value;
                 var version = Value(item, "VersionOverride") ?? Value(item, "Version") ?? central.GetValueOrDefault(id) ?? "unknown";
                 var key = $"{id}/{version}";
-                if (!graph.Packages.Any(p => p.Key == key)) graph.Packages.Add(new(key, id, version, true, version, false));
+                if (declared.Add(key)) graph.Packages.Add(new(key, id, version, true, version, false));
                 graph.Roots.Add(key);
             }
             var legacy = Path.Combine(Path.GetDirectoryName(project.Path)!, "packages.config");
@@ -104,7 +105,10 @@ public static class Analyzer
                     var id = item.Attribute("id")?.Value;
                     if (id is null) continue;
                     var version = item.Attribute("version")?.Value ?? "unknown";
-                    graph.Packages.Add(new($"{id}/{version}", id, version, false, version, false));
+                    var key = $"{id}/{version}";
+                    if (!declared.Add(key)) continue;
+                    graph.Packages.Add(new(key, id, version, true, version, false));
+                    graph.Roots.Add(key);
                 }
                 diagnostics.Add(new("LEGACY_PACKAGES", "packages.config entries are declarations; direct/transitive classification and dependency chains are unavailable.", project.Id));
             }
@@ -112,7 +116,7 @@ public static class Analyzer
         }
         catch (Exception ex) when (ex is System.Xml.XmlException or IOException)
         {
-            diagnostics.Add(new("INVALID_PROJECT", ex.Message, project.Id));
+            diagnostics.Add(new("INVALID_PROJECT", ex.Message, project.Id, DiagnosticSeverity.Error));
         }
     }
 
