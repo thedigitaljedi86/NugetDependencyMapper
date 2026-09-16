@@ -18,6 +18,9 @@ internal static class RetroConsole
     // the status bar off screen. A smaller window gets plain line output instead.
     private const int MinWidth = 40;
     private const int MinHeight = 12;
+    // ConsoleColor.Blue is the *bright* blue (SGR 104). The text-mode setup this imitates used
+    // the classic VGA dark blue, index 1, which .NET calls DarkBlue (SGR 44).
+    private const ConsoleColor Background = ConsoleColor.DarkBlue;
 
     /// <summary>
     /// The chrome is purely decorative and takes over the terminal, so it only runs when both
@@ -82,7 +85,7 @@ internal static class RetroConsole
 
     private static void Paint()
     {
-        Console.BackgroundColor = ConsoleColor.Blue;
+        Console.BackgroundColor = Background;
         Console.ForegroundColor = ConsoleColor.White;
         for (var row = 0; row < _height; row++)
         {
@@ -255,10 +258,10 @@ internal static class RetroConsole
     private static void WriteFooter()
     {
         Console.BackgroundColor = ConsoleColor.Gray;
-        Console.ForegroundColor = ConsoleColor.Blue;
+        Console.ForegroundColor = Background;
         Console.SetCursorPosition(0, _height - 1);
         Console.Write(Fit($" {Footer}", _width));
-        Console.BackgroundColor = ConsoleColor.Blue;
+        Console.BackgroundColor = Background;
         Console.ForegroundColor = ConsoleColor.White;
     }
 
