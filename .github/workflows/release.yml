@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - "v*.*.*"
+  # Publish without pushing a tag by hand. The csproj version is authoritative and the
+  # workflow creates the matching tag itself, once the build and the tests have passed.
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -13,15 +16,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify the tag matches the packaged version
+      - name: Resolve the version to publish
+        id: version
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          set -euo pipefail
           version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/NugetDependencyMapper/NugetDependencyMapper.csproj | head -1)
-          tag="${GITHUB_REF_NAME#v}"
-          if [ "$version" != "$tag" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match <Version>$version</Version> in the csproj. Bump the version before tagging."
+          if [ -z "$version" ]; then
+            echo "::error::Could not read <Version> from src/NugetDependencyMapper/NugetDependencyMapper.csproj."
             exit 1
           fi
-          echo "Publishing version $version"
+          tag="v$version"
+
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            # Tag push: the tag is what a human chose, so it has to match what will be packed.
+            if [ "$GITHUB_REF_NAME" != "$tag" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME does not match <Version>$version</Version> in the csproj. Bump the version before tagging."
+              exit 1
+            fi
+          else
+            # Manual run: publishing a feature branch is never intended.
+            if [ "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]; then
+              echo "::error::Release from $DEFAULT_BRANCH, not $GITHUB_REF_NAME."
+              exit 1
+            fi
+            # A NuGet version cannot be republished, so an existing tag means this one is spent.
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+              echo "::error::$tag already exists, so $version has been released. Bump <Version> in the csproj first."
+              exit 1
+            fi
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Publishing version $version as $tag"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -40,11 +69,25 @@ jobs:
       - name: Pack
         run: dotnet pack src/NugetDependencyMapper -c Release -o artifacts --no-build
 
+      # After the tests, so a failing build never leaves a tag behind, and before anything is
+      # published, so the commit that produced the package is recorded. A tag pushed with
+      # GITHUB_TOKEN does not start another workflow run, so this cannot loop back into itself.
+      - name: Tag the release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
       - name: Push to NuGet.org
         run: dotnet nuget push "artifacts/*.nupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
           files: artifacts/*.nupkg
           generate_release_notes: true

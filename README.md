@@ -187,6 +187,16 @@ git push origin vX.Y.Z
 
 Workflowet afviser et tag, der ikke matcher `<Version>` i csproj-filen, så en glemt version-bump ikke stille publicerer den forrige version. `--version` læser samme nummer fra assemblyen.
 
+Samme workflow kan også startes manuelt — fra **Actions → Release → Run workflow**, eller med `gh workflow run release.yml --ref main` — hvis du ikke kan eller vil pushe et tag i hånden. Så er csproj-filen det autoritative: workflowet læser `<Version>`, bygger og tester, opretter selv taget `vX.Y.Z` på den kørte commit og publicerer derefter. Forskellen på de to veje er kun, hvem der laver taget.
+
+Den manuelle vej har tre værn, fordi en NuGet-version ikke kan trækkes tilbage:
+
+- Den kører kun fra standardbranchen. Et forsøg fra en feature-branch afvises.
+- Findes taget allerede, afvises kørslen — versionen er brugt, og `<Version>` skal bumpes først.
+- Taget oprettes efter at build og tests er grønne, og før der publiceres, så en fejlet build aldrig efterlader et tag.
+
+Et tag, som workflowet selv pusher, starter ikke en ny kørsel, så den manuelle vej kan ikke løbe i ring.
+
 Hvert push til `main` kører desuden [.github/workflows/ci.yml](.github/workflows/ci.yml) (build, test, pack-verifikation) uden at publicere noget.
 
 ## Oplagte næste udvidelser
