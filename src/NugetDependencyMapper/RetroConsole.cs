@@ -15,7 +15,13 @@ internal static class RetroConsole
     private const int HeaderRows = 3;
     private const int FooterRows = 1;
 
-    public static bool Enabled { get; } = !Console.IsOutputRedirected && Environment.GetEnvironmentVariable("NO_COLOR") is null;
+    /// <summary>
+    /// The chrome is purely decorative and takes over the terminal, so it only runs when both
+    /// streams are a real terminal. NO_COLOR and NUGET_MAP_PLAIN opt out explicitly.
+    /// </summary>
+    public static bool Enabled { get; } = !Console.IsOutputRedirected && !Console.IsInputRedirected
+        && Environment.GetEnvironmentVariable("NO_COLOR") is null
+        && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_MAP_PLAIN"));
 
     private static bool _active;
     private static int _width;

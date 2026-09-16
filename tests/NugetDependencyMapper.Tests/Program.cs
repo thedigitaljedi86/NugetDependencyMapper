@@ -2,6 +2,10 @@ using System.Text.Json;
 using NugetDependencyMapper;
 using Cli = NugetDependencyMapper.Program;
 
+// Must run before anything touches RetroConsole: the CLI tests call Program.Main directly, and the
+// full-screen chrome would otherwise repaint the terminal and wait for ENTER on a developer machine.
+Environment.SetEnvironmentVariable("NUGET_MAP_PLAIN", "1");
+
 var tests = new (string Name, Func<Task> Run)[]
 {
     ("Restored graph preserves transitive chains and project edges", () => Check(f =>
@@ -218,6 +222,61 @@ var tests = new (string Name, Func<Task> Run)[]
         Assert(report.Packages.Single(p => p.Id == "Leaf").HasVersionDrift, "drift across repositories");
         Assert(report.Packages.Single(p => p.Id == "Leaf").Usages.Count == 40, "all reverse usages retained");
     })),
+    ("Version is read from the assembly, not a hard-coded literal", () => Check(_ =>
+    {
+        Assert(System.Version.TryParse(Cli.Version.Split('-', '+')[0], out var parsed) && parsed.Major + parsed.Minor > 0,
+            $"parsable assembly version, got '{Cli.Version}'");
+        Assert(Options.HelpText.Contains("--version"), "version is documented");
+    })),
+    ("NuGet warnings are reported but do not fail an otherwise complete run", async () =>
+    {
+        using var f = new Fixture();
+        var path = f.Project("App"); f.Assets(path);
+        f.Log(path, "NU1603", "Warning", "App depends on Leaf (>= 1.0.0) but Leaf 1.0.0 was not found.");
+        var report = Analyzer.Analyze(path);
+        Assert(report.Diagnostics.Single(d => d.Code == "NU1603").Severity == DiagnosticSeverity.Warning, "NuGet warning level honoured");
+        Assert(await Cli.Main([path, "--name", "W", "-o", Path.Combine(f.Root, "w.html"), "--fail-on-incomplete"]) == 0, "warnings alone must not fail CI");
+    }),
+    ("NuGet errors still fail an incomplete run", async () =>
+    {
+        using var f = new Fixture();
+        var path = f.Project("App"); f.Assets(path);
+        f.Log(path, "NU1101", "Error", "Unable to find package Leaf.");
+        Assert(Analyzer.Analyze(path).Diagnostics.Single(d => d.Code == "NU1101").Severity == DiagnosticSeverity.Error, "NuGet error level honoured");
+        Assert(await Cli.Main([path, "--name", "E", "-o", Path.Combine(f.Root, "e.html"), "--fail-on-incomplete"]) == 3, "error-level notes fail the run");
+    }),
+    ("Dependencies outside the restored graph are summarised once per target", () => Check(f =>
+    {
+        var path = f.Project("App"); f.Assets(path);
+        var assets = Path.Combine(Path.GetDirectoryName(path)!, "obj/project.assets.json");
+        var document = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(assets))!;
+        var dependencies = document["targets"]!["net8.0"]!["Root/1.0.0"]!["dependencies"]!.AsObject();
+        foreach (var absent in new[] { "System.Runtime", "System.Text.Json", "System.Memory", "System.Buffers", "System.Threading", "System.Linq" })
+            dependencies[absent] = "1.0.0";
+        File.WriteAllText(assets, document.ToJsonString());
+        var unresolved = Analyzer.Analyze(path).Diagnostics.Where(d => d.Code == "UNRESOLVED_EDGE").ToList();
+        Assert(unresolved.Count == 1, $"one aggregated note per target, got {unresolved.Count}");
+        Assert(unresolved[0].Severity == DiagnosticSeverity.Warning, "framework-provided dependencies are not an error");
+        Assert(unresolved[0].Message.Contains("6 dependencies") && unresolved[0].Message.Contains("System.Buffers") && unresolved[0].Message.EndsWith("PrivateAssets/ExcludeAssets."),
+            $"counted and truncated summary: {unresolved[0].Message}");
+    })),
+    ("packages.config entries stay visible as direct declarations", () => Check(f =>
+    {
+        var path = f.Project("App");
+        f.Write("App/packages.config", "<packages><package id=\"Newtonsoft.Json\" version=\"12.0.3\" /><package id=\"Newtonsoft.Json\" version=\"12.0.3\" /></packages>");
+        var graph = Analyzer.Analyze(path).Projects.Single().Targets.Single();
+        var use = graph.Packages.Single(p => p.Id == "Newtonsoft.Json");
+        Assert(use.Direct && !use.Resolved, "declared directly, but never claimed as installed");
+        Assert(graph.Roots.Count(r => r == use.Key) == 1, "a single graph root per declaration");
+    })),
+    ("Diagnostic severity reaches the report as a readable string", () => Check(_ =>
+    {
+        var report = Demo.Create();
+        report.Diagnostics.Add(new("RESTORE_FAILED", "boom", "a.csproj", DiagnosticSeverity.Error));
+        report.Diagnostics.Add(new("STALE_RESTORE", "old", "a.csproj"));
+        var json = HtmlReport.Json(report);
+        Assert(json.Contains("\"severity\":\"error\"") && json.Contains("\"severity\":\"warning\""), "severity is exported as a string the report can read");
+    })),
     ("No projects is an error, not an empty successful report", () => Check(f =>
     {
         try { Analyzer.Analyze(f.Root); throw new Exception("Expected failure"); }
@@ -265,6 +324,16 @@ sealed class Fixture : IDisposable
         var assetsPath = Path.Combine(Path.GetDirectoryName(path)!, "obj/project.assets.json");
         Directory.CreateDirectory(Path.GetDirectoryName(assetsPath)!); File.WriteAllText(assetsPath, JsonSerializer.Serialize(document));
     }
+    public void Log(string project, string code, string level, string message)
+    {
+        var assets = Path.Combine(Path.GetDirectoryName(project)!, "obj/project.assets.json");
+        var document = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(assets))!;
+        var logs = document["logs"]?.AsArray() ?? new System.Text.Json.Nodes.JsonArray();
+        logs.Add(new System.Text.Json.Nodes.JsonObject { ["code"] = code, ["level"] = level, ["message"] = message });
+        document["logs"] = logs;
+        File.WriteAllText(assets, document.ToJsonString());
+    }
+
     public void Dispose() => Directory.Delete(Root, true);
     public void License(string project, string key, string metadata)
     {

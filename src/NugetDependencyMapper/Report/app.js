@@ -64,20 +64,27 @@
   $('sample-label').hidden = !data.isDemo;
   $('sample-label').title = 'Synthetic package versions and dependency edges for demonstrating the UI; not real package metadata.';
   $('project-count').textContent = data.projects.length;
-  $('package-count').textContent = data.packages.length;
-  $('drift-count').textContent = drift.length;
-  $('drift-badge').textContent = drift.length;
-  $('transitive-count').textContent = data.packages.filter(p=>p.usages.some(u=>u.resolved && !u.direct)).length;
-  const ERROR_CODES = new Set(['MISSING_PROJECT','INVALID_ASSETS','INVALID_PROJECT','RESTORE_FAILED']);
+  // The namespace filter hides packages everywhere else, so the headline counts have to follow it.
+  function paintStats() {
+    const visible = data.packages.filter(p=>!isExcluded(p.id));
+    const visibleDrift = visible.filter(p=>p.hasVersionDrift);
+    $('package-count').textContent = visible.length;
+    $('drift-count').textContent = visibleDrift.length;
+    $('drift-badge').textContent = visibleDrift.length;
+    $('transitive-count').textContent = visible.filter(p=>p.usages.some(u=>u.resolved && !u.direct)).length;
+    const hidden = data.packages.length - visible.length;
+    $('ns-filter-count').textContent = hidden ? `${hidden} hidden` : '';
+  }
+  const isError = d => d.severity === 'error';
   if (data.diagnostics.length) {
-    const errors = data.diagnostics.filter(d=>ERROR_CODES.has(d.code));
+    const errors = data.diagnostics.filter(isError);
     $('diagnostics-section').hidden = false;
     $('diagnostics-section').classList.toggle('has-errors', errors.length>0);
     $('diagnostics-section').querySelector('details').open = errors.length>0;
     $('diagnostics-title').textContent = errors.length
       ? `${errors.length} error${errors.length===1?'':'s'} to fix · ${data.diagnostics.length} analysis note${data.diagnostics.length===1?'':'s'} total`
       : `${data.diagnostics.length} analysis note${data.diagnostics.length===1?'':'s'} · Check coverage before planning an upgrade`;
-    $('diagnostics-list').innerHTML = data.diagnostics.map(d=>`<div class="diagnostic ${ERROR_CODES.has(d.code)?'diagnostic-error':''}"><code>${esc(d.code)}</code>${esc(d.message)}<small>${esc(d.project)}</small></div>`).join('');
+    $('diagnostics-list').innerHTML = data.diagnostics.map(d=>`<div class="diagnostic ${isError(d)?'diagnostic-error':''}"><code>${esc(d.code)}</code>${esc(d.message)}<small>${esc(d.project)}</small></div>`).join('');
   }
 
   function setView(view) {
@@ -309,7 +316,7 @@
   $('depth').addEventListener('change',()=>{state.depth=Number($('depth').value);renderGraph();});
   onClick('reset',fit);onClick('zoom-in',()=>zoom(1.25));onClick('zoom-out',()=>zoom(.8));
   onClick('export',()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='nuget-map.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
-  const csvField=value=>{value=String(value??'');return /[",\r\n]/.test(value)?'"'+value.replace(/"/g,'""')+'"':value;};
+  const csvField=value=>{value=String(value??'');if(/^[=+\-@\t\r]/.test(value))value="'"+value;return /[",\r\n]/.test(value)?'"'+value.replace(/"/g,'""')+'"':value;};
   onClick('export-package',()=>{
     const pkg=selectedPackage();if(!pkg)return;
     const rows=packageProjectRows(pkg);
@@ -322,13 +329,12 @@
     const raw=$('ns-filter').value;
     state.excludePrefixes=raw.split(',').map(s=>s.trim()).filter(Boolean);
     try { localStorage.setItem(NS_FILTER_KEY, raw); } catch {}
-    const hiddenCount=data.packages.filter(p=>isExcluded(p.id)).length;
-    $('ns-filter-count').textContent=hiddenCount?`${hiddenCount} hidden`:'';
+    paintStats();
     render();
     if(state.view!=='map') renderTable();
   }
   try { $('ns-filter').value=localStorage.getItem(NS_FILTER_KEY) ?? ''; } catch {}
-  $('ns-filter-count').textContent=(()=>{const n=data.packages.filter(p=>isExcluded(p.id)).length;return n?`${n} hidden`:'';})();
+  paintStats();
   $('ns-filter').addEventListener('input', applyNamespaceFilter);
   document.addEventListener('keydown',e=>{if(e.key==='/'&&!e.ctrlKey&&!e.metaKey&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){e.preventDefault();(state.view==='map'?$('search'):$('table-search')).focus();}});
   setExplorer('projects');render();
